@@ -1,7 +1,6 @@
 
 pub mod config;
 pub mod constants;
-pub mod protocol;
 
 // ===== Imports =====
 #[macro_use] extern crate log;
@@ -30,9 +29,9 @@ async fn main() -> Result<()> {
 
   let lis = UdpSocket::bind((host, port)).await?;
   loop {
-    let mut header_buff = [0; 12];
-    let (_len, _from) = lis.recv_from(&mut header_buff).await?;
-    let header = protocol::header::Header::parse(header_buff);
-    println!("{:?}", header);
+    let mut buff = [0; 512];
+    let (_len, _from) = lis.recv_from(&mut buff).await?;
+    let packet = drasil_dns::packet::Packet::parse(buff);
+    println!("{:#?}", packet);
   }
 }

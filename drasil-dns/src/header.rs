@@ -1,8 +1,42 @@
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestKind {
   Query = 0,
   Response = 1,
+}
+
+impl From<u8> for RequestKind {
+  fn from(value: u8) -> Self {
+    match value {
+      0 => RequestKind::Query,
+      1 => RequestKind::Response,
+      _ => unreachable!(),
+    }
+  }
+}
+
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum ResponseCode {
+  NOERROR = 0,
+  FORMERR = 1,
+  SERVFAIL = 2,
+  NXDOMAIN = 3,
+  NOTIMP = 4,
+  REFUSED = 5,
+}
+
+impl From<u8> for ResponseCode {
+  fn from(value: u8) -> Self {
+    match value {
+      1 => ResponseCode::FORMERR,
+      2 => ResponseCode::SERVFAIL,
+      3 => ResponseCode::NXDOMAIN,
+      4 => ResponseCode::NOTIMP,
+      5 => ResponseCode::REFUSED,
+      0 | _ => ResponseCode::NOERROR,
+    }
+  }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -15,15 +49,15 @@ pub struct Header {
   pub is_recursion_desired: bool,
   pub is_recursion_available: bool,
   pub reserved: u8,
-  pub response_code: u8,
+  pub response_code: ResponseCode,
   pub question_count: u16,
   pub answer_count: u16,
   pub authority_count: u16,
   pub additional_count: u16,
 }
 
-impl Header {
-  pub fn parse(data: [u8; 12]) -> Self {
+impl From<[u8; 12]> for Header {
+  fn from(data: [u8; 12]) -> Self {
     let id = {
       let high = data[0] as u16;
       let low = data[1] as u16;
@@ -31,12 +65,7 @@ impl Header {
     };
 
     let request_kind = {
-      let byte = data[2];
-      match byte >> 7 {
-        0 => RequestKind::Query,
-        1 => RequestKind::Response,
-        _ => unreachable!()
-      }
+      RequestKind::from(data[2] >> 7)
     };
 
     let opcode = {
@@ -69,7 +98,7 @@ impl Header {
     };
 
     let response_code = {
-      data[3] & 0b00001111
+      ResponseCode::from(data[3] & 0b00001111)
     };
 
     let question_count = {
