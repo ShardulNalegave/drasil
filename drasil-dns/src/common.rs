@@ -4,7 +4,9 @@ use crate::error::DrasilDNSError;
 // ===================
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u16)]
 pub enum RecordType {
+  Unknown(u16),
   A = 1,
 }
 
@@ -12,13 +14,15 @@ impl From<u16> for RecordType {
   fn from(value: u16) -> Self {
     match value {
       1 => Self::A,
-      v => panic!("No RecordType of value {} exists", v),
+      v => Self::Unknown(v),
     }
   }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u16)]
 pub enum RecordClass {
+  Unknown(u16),
   IN = 1,
 }
 
@@ -26,7 +30,7 @@ impl From<u16> for RecordClass {
   fn from(value: u16) -> Self {
     match value {
       1 => Self::IN,
-      v => panic!("No RecordClass of value {} exists", v),
+      v => Self::Unknown(v),
     }
   }
 }

@@ -1,4 +1,6 @@
 
+pub mod builder;
+
 // ===== Imports =====
 use crate::{
   error::DrasilDNSError,

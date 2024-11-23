@@ -15,7 +15,6 @@ impl From<u8> for RequestKind {
   }
 }
 
-
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ResponseCode {
   NOERROR = 0,
@@ -58,11 +57,10 @@ pub struct Header {
 
 impl From<[u8; 12]> for Header {
   fn from(data: [u8; 12]) -> Self {
-    let id = {
-      let high = data[0] as u16;
-      let low = data[1] as u16;
-      (high << 8) + low
-    };
+    let id = u16::from_be_bytes([
+      data[0],
+      data[1],
+    ]);
 
     let request_kind = {
       RequestKind::from(data[2] >> 7)
@@ -101,29 +99,25 @@ impl From<[u8; 12]> for Header {
       ResponseCode::from(data[3] & 0b00001111)
     };
 
-    let question_count = {
-      let high = data[4] as u16;
-      let low = data[5] as u16;
-      (high << 8) + low
-    };
+    let question_count = u16::from_be_bytes([
+      data[4],
+      data[5],
+    ]);
 
-    let answer_count = {
-      let high = data[6] as u16;
-      let low = data[7] as u16;
-      (high << 8) + low
-    };
+    let answer_count = u16::from_be_bytes([
+      data[6],
+      data[7],
+    ]);
 
-    let authority_count = {
-      let high = data[8] as u16;
-      let low = data[9] as u16;
-      (high << 8) + low
-    };
+    let authority_count = u16::from_be_bytes([
+      data[8],
+      data[9],
+    ]);
 
-    let additional_count = {
-      let high = data[10] as u16;
-      let low = data[11] as u16;
-      (high << 8) + low
-    };
+    let additional_count = u16::from_be_bytes([
+      data[10],
+      data[11],
+    ]);
     
     Self {
       id,
@@ -140,5 +134,45 @@ impl From<[u8; 12]> for Header {
       authority_count,
       additional_count,
     }
+  }
+}
+
+impl Into<[u8; 12]> for Header {
+  fn into(self) -> [u8; 12] {
+    let mut buff = [0; 12];
+    buff[0..2].copy_from_slice(&self.id.to_be_bytes());
+
+    let mut flags = 0_u16;
+    
+    flags |= (self.request_kind as u16) << 15;
+    flags |= (self.opcode as u16) << 14;
+
+    if self.is_authoritative_answer {
+      flags |= 0b00000100_00000000;
+    }
+
+    if self.is_truncated_message {
+      flags |= 0b00000010_00000000;
+    }
+
+    if self.is_recursion_desired {
+      flags |= 0b00000001_00000000;
+    }
+
+    if self.is_recursion_available {
+      flags |= 0b00000000_10000000;
+    }
+
+    flags |= (self.reserved as u16) << 4;
+    flags |= self.response_code as u16;
+
+    buff[2..4].copy_from_slice(&flags.to_be_bytes());
+
+    buff[4..6].copy_from_slice(&self.question_count.to_be_bytes());
+    buff[6..8].copy_from_slice(&self.answer_count.to_be_bytes());
+    buff[8..10].copy_from_slice(&self.authority_count.to_be_bytes());
+    buff[10..12].copy_from_slice(&self.additional_count.to_be_bytes());
+
+    buff
   }
 }
