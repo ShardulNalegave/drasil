@@ -4,6 +4,13 @@ export default {
     content: ['./index.html', './src/**/*.{ts,tsx,js,jsx}'],
   theme: {
   	extend: {
+			fontFamily: {
+				sans: ['Lexend'],
+				body: ['Lexend'],
+				heading: ['Raleway'],
+				display: ['"Jersey 25"'],
+				mono: ['"Space Grotesk"'],
+			},
   		borderRadius: {
   			lg: 'var(--radius)',
   			md: 'calc(var(--radius) - 2px)',
