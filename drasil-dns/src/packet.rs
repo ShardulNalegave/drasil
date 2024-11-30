@@ -1,4 +1,5 @@
 
+/// Provides a builder struct for Packet
 pub mod builder;
 
 // ===== Imports =====
@@ -64,6 +65,7 @@ impl Packet {
     })
   }
 
+  /// Convert a DNS packet into bytes
   pub fn to_bytes(&self) -> Result<[u8; 512], DrasilDNSError> {
     let mut buff = Buffer::default();
     self.header.write_bytes(&mut buff)?;

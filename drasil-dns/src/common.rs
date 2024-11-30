@@ -1,4 +1,6 @@
 
+/// # Record Class
+/// Enum representing record class value in records and questions
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u16)]
 pub enum RecordClass {
@@ -24,6 +26,8 @@ impl From<u16> for RecordClass {
   }
 }
 
+/// # Record Type
+/// Enum representing record type value in records and questions
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u16)]
 pub enum RecordType {

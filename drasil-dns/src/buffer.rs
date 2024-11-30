@@ -3,7 +3,7 @@
 use crate::error::DrasilDNSError;
 // ===================
 
-pub struct Buffer {
+pub(crate) struct Buffer {
   pos: usize,
   data: [u8; 512],
 }
@@ -29,14 +29,6 @@ impl Buffer {
 
   pub fn seek(&mut self, pos: usize) {
     self.pos = pos;
-  }
-
-  pub fn peek(&self) -> Result<u8, DrasilDNSError> {
-    if self.pos > 512 {
-      return Err(DrasilDNSError::EOF);
-    }
-
-    Ok(self.data[self.pos])
   }
 
   pub fn get_range(&mut self, from: usize, len: usize) -> Result<&[u8], DrasilDNSError> {

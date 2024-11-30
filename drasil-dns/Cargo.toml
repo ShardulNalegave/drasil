@@ -1,7 +1,13 @@
 [package]
 name = "drasil-dns"
+description = "Rust crate to easily serialize and deserialize DNS packets"
 version = "0.1.0"
 edition = "2021"
+readme = "README.md"
+license = "MIT"
+repository = "https://github.com/ShardulNalegave/drasil"
+keywords = ["dns", "packet", "serialize", "deserialize", "networking"]
+categories = ["network-programming"]
 
 [dependencies]
 thiserror = "2.0.3"

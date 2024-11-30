@@ -16,24 +16,32 @@ pub enum Record {
     class: RecordClass,
     data: Vec<u8>,
   }, // 0
+
+  /// `A` record maps domain names to IPv4 addresses
   A {
     domain: Vec<String>,
     addr: Ipv4Addr,
     ttl: u32,
     class: RecordClass,
   }, // 1
+
+  /// `NS` record tells which nameserver is responsible for the asked domain
   NS {
     domain: Vec<String>,
     host: Vec<String>,
     ttl: u32,
     class: RecordClass,
   }, // 2
+
+  /// `CNAME` record maps one domain name to another one
   CNAME {
     domain: Vec<String>,
     host: Vec<String>,
     ttl: u32,
     class: RecordClass,
   }, // 5
+
+  /// `MX` (Mail Exchange) record specifies where to deliver emails for a specific domain
   MX {
     domain: Vec<String>,
     priority: u16,
@@ -41,6 +49,8 @@ pub enum Record {
     ttl: u32,
     class: RecordClass,
   }, // 15
+
+  /// `AAAA` record maps domains to IPv6 addresses
   AAAA {
     domain: Vec<String>,
     addr: Ipv6Addr,
@@ -50,7 +60,7 @@ pub enum Record {
 }
 
 impl Record {
-  pub fn parse(buff: &mut Buffer) -> Result<Self, DrasilDNSError> {
+  pub(crate) fn parse(buff: &mut Buffer) -> Result<Self, DrasilDNSError> {
     let domain = buff.read_labels()?;
     let record_type = RecordType::from(buff.get_u16()?);
     let class = RecordClass::from(buff.get_u16()?);
@@ -98,7 +108,7 @@ impl Record {
     })
   }
 
-  pub fn write_bytes(&self, buff: &mut Buffer) -> Result<(), DrasilDNSError> {
+  pub(crate) fn write_bytes(&self, buff: &mut Buffer) -> Result<(), DrasilDNSError> {
     match self {
       Record::Unknown {
         domain,

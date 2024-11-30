@@ -3,6 +3,7 @@
 use thiserror::Error;
 // ===================
 
+/// Error type for Drasil-DNS
 #[derive(Error, Debug)]
 pub enum DrasilDNSError {
   #[error("unknown error")]

@@ -5,6 +5,19 @@ use crate::{
 };
 // ===================
 
+/// # Packet Builder
+/// Utility struct to construct DNS packets.
+/// Example:-
+/// ```rust
+/// let packet = PacketBuilder::new(5)
+///   .with_request_kind(RequestKind::Query)
+///   .recursion_desired()
+///   .add_question(Question {
+///     name: vec!["google".into(), "com".into()],
+///     record_type: RecordType::A,
+///     record_class: RecordClass::IN,
+///   }).build();
+/// ```
 pub struct PacketBuilder {
   id: u16,
   request_kind: RequestKind,
@@ -23,6 +36,7 @@ pub struct PacketBuilder {
 }
 
 impl PacketBuilder {
+  /// Create a new builder with the provided ID.
   pub fn new(id: u16) -> Self {
     Self {
       id,
@@ -41,6 +55,7 @@ impl PacketBuilder {
     }
   }
 
+  /// Build a new packet from the specified options.
   pub fn build(self) -> Packet {
     Packet {
       header: Header {
@@ -65,51 +80,61 @@ impl PacketBuilder {
     }
   }
 
+  /// Specify the request kind for the packet
   pub fn with_request_kind(mut self, kind: RequestKind) -> Self {
     self.request_kind = kind;
     self
   }
 
+  /// Set opcode for the packet
   pub fn with_opcode(mut self, opcode: u8) -> Self {
     self.opcode = opcode & 0b00001111;
     self
   }
 
+  /// Sets authoritative answer flag to true
   pub fn authoritative_answer(mut self) -> Self {
     self.is_authoritative_answer = true;
     self
   }
 
+  /// Sets truncated message flag to true
   pub fn truncated_message(mut self) -> Self {
     self.is_truncated_message = true;
     self
   }
 
+  /// Sets recursion desired flag to true
   pub fn recursion_desired(mut self) -> Self {
     self.is_recursion_desired = true;
     self
   }
 
+  /// Sets recursion available flag to true
   pub fn recursion_available(mut self) -> Self {
     self.is_recursion_available = true;
     self
   }
 
+  /// Add a new question to the packet
   pub fn add_question(mut self, question: Question) -> Self {
     self.questions.push(question);
     self
   }
 
+  /// Add a new answer record to the packet
   pub fn add_answer(mut self, record: Record) -> Self {
     self.answers.push(record);
     self
   }
 
+  /// Add a new authority record to the packet
   pub fn add_authority(mut self, record: Record) -> Self {
     self.authority.push(record);
     self
   }
 
+  /// Add a new additional record to the packet
   pub fn add_additional(mut self, record: Record) -> Self {
     self.additional.push(record);
     self

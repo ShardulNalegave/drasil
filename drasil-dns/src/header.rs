@@ -66,7 +66,7 @@ pub struct Header {
 }
 
 impl Header {
-  pub fn parse(buff: &mut Buffer) -> Result<Header, DrasilDNSError> {
+  pub(crate) fn parse(buff: &mut Buffer) -> Result<Header, DrasilDNSError> {
     let id = buff.get_u16()?;
     let [flag_high, flag_low] = buff.get_u16()?.to_be_bytes();
     let question_count = buff.get_u16()?;
@@ -102,7 +102,7 @@ impl Header {
     })
   }
 
-  pub fn write_bytes(&self, buff: &mut Buffer) -> Result<(), DrasilDNSError> {
+  pub(crate) fn write_bytes(&self, buff: &mut Buffer) -> Result<(), DrasilDNSError> {
     let mut flag_high = 0_u8;
     let mut flag_low = 0_u8;
 
