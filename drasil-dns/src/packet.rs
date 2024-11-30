@@ -3,13 +3,12 @@ pub mod builder;
 
 // ===== Imports =====
 use crate::{
-  error::DrasilDNSError,
-  header::Header,
-  question::Question,
-  record::Record,
+  buffer::Buffer, error::DrasilDNSError, header::Header, question::Question, record::Record
 };
 // ===================
 
+/// # Packet
+/// Struct representing a single DNS packet.
 #[derive(Debug, Clone)]
 pub struct Packet {
   pub header: Header,
@@ -20,36 +19,39 @@ pub struct Packet {
 }
 
 impl Packet {
-  pub fn parse(data: [u8; 512]) -> Result<Self, DrasilDNSError> {
-    let header_buff: [u8; 12] = data[0..12]
-      .try_into()
-      .map_err(|_| DrasilDNSError::CouldntParseHeader)?;
-    let header: Header = header_buff.into();
+  /// Get a DNS packet from bytes.
+  pub fn parse(data: &[u8]) -> Result<Self, DrasilDNSError> {
+    if data.len() != 512 {
+      return Err(DrasilDNSError::InvalidPacketSize { size: data.len() });
+    }
+
+    let data: [u8; 512] = data[0..512].try_into().unwrap(); // unwrap is safe as we have already checked for size
+    let mut buff = Buffer::new(data);
+
+    let header = Header::parse(&mut buff)?;
 
     let mut questions = vec![];
     let mut answers = vec![];
     let mut authority = vec![];
     let mut additional = vec![];
 
-    let mut pos = 12;
-
     for _ in 0..header.question_count {
-      let q = Question::parse(&data, &mut pos)?;
+      let q = Question::parse(&mut buff)?;
       questions.push(q);
     }
 
     for _ in 0..header.answer_count {
-      let r = Record::parse(&data, &mut pos)?;
+      let r = Record::parse(&mut buff)?;
       answers.push(r);
     }
 
     for _ in 0..header.authority_count {
-      let r = Record::parse(&data, &mut pos)?;
+      let r = Record::parse(&mut buff)?;
       authority.push(r);
     }
 
     for _ in 0..header.additional_count {
-      let r = Record::parse(&data, &mut pos)?;
+      let r = Record::parse(&mut buff)?;
       additional.push(r);
     }
 

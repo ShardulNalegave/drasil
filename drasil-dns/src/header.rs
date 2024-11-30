@@ -1,4 +1,10 @@
 
+// ===== Imports =====
+use crate::{buffer::Buffer, error::DrasilDNSError};
+// ===================
+
+/// # Request Kind
+/// Flag in packet's header. Helps differentiate between queries and its responses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestKind {
   Query = 0,
@@ -15,6 +21,8 @@ impl From<u8> for RequestKind {
   }
 }
 
+/// # Response Code
+/// Flag representing packet's response.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ResponseCode {
   NOERROR = 0,
@@ -38,6 +46,8 @@ impl From<u8> for ResponseCode {
   }
 }
 
+/// # Header
+/// Struct representing DNS packet header.
 #[derive(Debug, Copy, Clone)]
 pub struct Header {
   pub id: u16,
@@ -55,71 +65,27 @@ pub struct Header {
   pub additional_count: u16,
 }
 
-impl From<[u8; 12]> for Header {
-  fn from(data: [u8; 12]) -> Self {
-    let id = u16::from_be_bytes([
-      data[0],
-      data[1],
-    ]);
+impl Header {
+  pub fn parse(buff: &mut Buffer) -> Result<Header, DrasilDNSError> {
+    let id = buff.get_u16()?;
+    let [flag_high, flag_low] = buff.get_u16()?.to_be_bytes();
+    let question_count = buff.get_u16()?;
+    let answer_count = buff.get_u16()?;
+    let authority_count = buff.get_u16()?;
+    let additional_count = buff.get_u16()?;
 
-    let request_kind = {
-      RequestKind::from(data[2] >> 7)
-    };
+    let request_kind = RequestKind::from(flag_high >> 7);
+    let opcode = (flag_high & 0b01111000) >> 3;
 
-    let opcode = {
-      let byte = data[2] & 0b01111000;
-      byte >> 3
-    };
+    let is_authoritative_answer = ((flag_high & 0b00000100) >> 2) == 1;
+    let is_truncated_message = ((flag_high & 0b00000010) >> 1) == 1;
+    let is_recursion_desired = (flag_high & 0b00000001) == 1;
+    let is_recursion_available = (flag_low >> 7) == 1;
 
-    let is_authoritative_answer = {
-      let byte = data[2] & 0b00000100;
-      (byte >> 2) == 1
-    };
+    let reserved = (flag_low & 0b01110000) >> 4;
+    let response_code = ResponseCode::from(flag_low & 0b00001111);
 
-    let is_truncated_message = {
-      let byte = data[2] & 0b00000010;
-      (byte >> 1) == 1
-    };
-
-    let is_recursion_desired = {
-      let byte = data[2] & 0b00000001;
-      byte == 1
-    };
-
-    let is_recursion_available = {
-      (data[3] >> 7) == 1
-    };
-
-    let reserved = {
-      let byte = data[3] & 0b01110000;
-      byte >> 4
-    };
-
-    let response_code = {
-      ResponseCode::from(data[3] & 0b00001111)
-    };
-
-    let question_count = u16::from_be_bytes([
-      data[4],
-      data[5],
-    ]);
-
-    let answer_count = u16::from_be_bytes([
-      data[6],
-      data[7],
-    ]);
-
-    let authority_count = u16::from_be_bytes([
-      data[8],
-      data[9],
-    ]);
-
-    let additional_count = u16::from_be_bytes([
-      data[10],
-      data[11],
-    ]);
-    
-    Self {
+    Ok(Self {
       id,
       request_kind,
       opcode,
@@ -133,46 +99,41 @@ impl From<[u8; 12]> for Header {
       answer_count,
       authority_count,
       additional_count,
-    }
+    })
   }
-}
 
-impl Into<[u8; 12]> for Header {
-  fn into(self) -> [u8; 12] {
-    let mut buff = [0; 12];
-    buff[0..2].copy_from_slice(&self.id.to_be_bytes());
+  pub fn write_bytes(&self, buff: &mut Buffer) -> Result<(), DrasilDNSError> {
+    let mut flag_high = 0_u8;
+    let mut flag_low = 0_u8;
 
-    let mut flags = 0_u16;
-    
-    flags |= (self.request_kind as u16) << 15;
-    flags |= (self.opcode as u16) << 14;
+    flag_high |= (self.request_kind as u8) << 7;
+    flag_high |= (self.opcode as u8) << 3;
 
     if self.is_authoritative_answer {
-      flags |= 0b00000100_00000000;
+      flag_high |= 0b00000100;
     }
 
     if self.is_truncated_message {
-      flags |= 0b00000010_00000000;
+      flag_high |= 0b00000010;
     }
 
     if self.is_recursion_desired {
-      flags |= 0b00000001_00000000;
+      flag_high |= 0b00000001;
     }
 
     if self.is_recursion_available {
-      flags |= 0b00000000_10000000;
+      flag_low |= 0b10000000;
     }
 
-    flags |= (self.reserved as u16) << 4;
-    flags |= self.response_code as u16;
+    flag_low |= self.reserved << 4;
+    flag_low |= self.response_code as u8;
 
-    buff[2..4].copy_from_slice(&flags.to_be_bytes());
-
-    buff[4..6].copy_from_slice(&self.question_count.to_be_bytes());
-    buff[6..8].copy_from_slice(&self.answer_count.to_be_bytes());
-    buff[8..10].copy_from_slice(&self.authority_count.to_be_bytes());
-    buff[10..12].copy_from_slice(&self.additional_count.to_be_bytes());
-
-    buff
+    buff.write_u16(self.id)?;
+    buff.write_u16(u16::from_be_bytes([flag_high, flag_low]))?;
+    buff.write_u16(self.question_count)?;
+    buff.write_u16(self.answer_count)?;
+    buff.write_u16(self.authority_count)?;
+    buff.write_u16(self.additional_count)?;
+    Ok(())
   }
 }

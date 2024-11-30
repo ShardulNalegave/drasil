@@ -1,31 +1,21 @@
 
 // ===== Imports =====
-use crate::{common::{read_name, RecordClass, RecordType}, error::DrasilDNSError};
+use crate::{buffer::Buffer, common::{RecordClass, RecordType}, error::DrasilDNSError};
 // ===================
 
 #[derive(Debug, Clone)]
 pub struct Question {
-  pub name: String,
+  pub name: Vec<String>,
   pub record_type: RecordType,
-  pub class: RecordClass,
+  pub record_class: RecordClass,
 }
 
 impl Question {
-  pub fn parse(packet_data: &[u8; 512], pos: &mut usize) -> Result<Self, DrasilDNSError> {
-    let name = read_name(packet_data, pos)?;
-    
-    let record_type = u16::from_be_bytes([
-      packet_data[*pos],
-      packet_data[*pos+1]
-    ]).into();
-    *pos += 2;
+  pub fn parse(buff: &mut Buffer) -> Result<Self, DrasilDNSError> {
+    let name = buff.read_labels()?;
+    let record_type = RecordType::from(buff.get_u16()?);
+    let record_class = RecordClass::from(buff.get_u16()?);
 
-    let class = u16::from_be_bytes([
-      packet_data[*pos],
-      packet_data[*pos+1]
-    ]).into();
-    *pos += 2;
-
-    Ok(Self { name, record_type, class })
+    Ok(Self { name, record_type, record_class })
   }
 }
