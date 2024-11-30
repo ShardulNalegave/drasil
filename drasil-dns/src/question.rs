@@ -18,4 +18,11 @@ impl Question {
 
     Ok(Self { name, record_type, record_class })
   }
+
+  pub fn write_bytes(&self, buff: &mut Buffer) -> Result<(), DrasilDNSError> {
+    buff.write_labels(&self.name)?;
+    buff.write_u16(self.record_type.into())?;
+    buff.write_u16(self.record_class.into())?;
+    Ok(())
+  }
 }

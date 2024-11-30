@@ -14,6 +14,7 @@ pub enum Record {
     len: u32,
     record_type: u16,
     class: RecordClass,
+    data: Vec<u8>,
   }, // 0
   A {
     domain: Vec<String>,
@@ -57,34 +58,152 @@ impl Record {
     let len = buff.get_u32()?;
 
     Ok(match record_type {
-      RecordType::Unknown(v) => Self::Unknown {
-        domain,
-        ttl,
-        len,
-        record_type: v,
-        class,
+      RecordType::Unknown(v) => {
+        let data = buff.get_range(buff.get_pos(), len as usize)?;
+        Self::Unknown {
+          domain,
+          ttl,
+          len,
+          record_type: v,
+          class,
+          data: data.to_vec(),
+        }
       },
+
       RecordType::A => {
         let addr = Ipv4Addr::from_bits(buff.get_u32()?);
         Self::A { domain, class, ttl, addr }
       },
+
       RecordType::NS => {
         let host = buff.read_labels()?;
         Self::NS { domain, host, ttl, class }
       },
+
       RecordType::CNAME => {
         let host = buff.read_labels()?;
         Self::NS { domain, host, ttl, class }
       },
+
       RecordType::MX => {
         let priority = buff.get_u16()?;
         let host = buff.read_labels()?;
         Self::MX { domain, priority, host, ttl, class }
       },
+
       RecordType::AAAA => {
         let addr = Ipv6Addr::from_bits(buff.get_u128()?);
         Self::AAAA { domain, class, ttl, addr }
       },
     })
+  }
+
+  pub fn write_bytes(&self, buff: &mut Buffer) -> Result<(), DrasilDNSError> {
+    match self {
+      Record::Unknown {
+        domain,
+        ttl,
+        len,
+        record_type,
+        class,
+        data,
+      } => {
+        buff.write_labels(domain)?;
+        buff.write_u16(*record_type)?;
+        buff.write_u16((*class).into())?;
+        buff.write_u32(*ttl)?;
+        buff.write_u32(*len)?;
+        buff.write_vec(data)?;
+      },
+
+      Record::A {
+        domain,
+        addr,
+        ttl,
+        class,
+      } => {
+        buff.write_labels(domain)?;
+        buff.write_u16(RecordType::A.into())?;
+        buff.write_u16((*class).into())?;
+        buff.write_u32(*ttl)?;
+        buff.write_u16(4)?;
+        buff.write_u32(addr.to_bits())?;
+      },
+
+      Record::NS {
+        domain,
+        host,
+        ttl,
+        class,
+      } => {
+        buff.write_labels(domain)?;
+        buff.write_u16(RecordType::NS.into())?;
+        buff.write_u16((*class).into())?;
+        buff.write_u32(*ttl)?;
+
+        let pos = buff.get_pos();
+        buff.write_u16(0)?;
+
+        buff.write_labels(host)?;
+
+        buff.set_u16(pos, (buff.get_pos() - (pos + 2)) as u16)?;
+      },
+
+      Record::CNAME {
+        domain,
+        host,
+        ttl,
+        class,
+      } => {
+        buff.write_labels(domain)?;
+        buff.write_u16(RecordType::CNAME.into())?;
+        buff.write_u16((*class).into())?;
+        buff.write_u32(*ttl)?;
+        
+        let pos = buff.get_pos();
+        buff.write_u16(0)?;
+
+        buff.write_labels(host)?;
+
+        buff.set_u16(pos, (buff.get_pos() - (pos + 2)) as u16)?;
+      },
+
+      Record::MX {
+        domain,
+        priority,
+        host,
+        ttl,
+        class,
+      } => {
+        buff.write_labels(domain)?;
+        buff.write_u16(RecordType::MX.into())?;
+        buff.write_u16((*class).into())?;
+        buff.write_u32(*ttl)?;
+        
+        let pos = buff.get_pos();
+        buff.write_u16(0)?;
+
+        buff.write_u16(*priority)?;
+        buff.write_labels(host)?;
+
+        buff.set_u16(pos, (buff.get_pos() - (pos + 2)) as u16)?;
+      },
+
+      Record::AAAA {
+        domain,
+        addr,
+        ttl,
+        class,
+      } => {
+        buff.write_labels(domain)?;
+        buff.write_u16(RecordType::A.into())?;
+        buff.write_u16((*class).into())?;
+        buff.write_u32(*ttl)?;
+        buff.write_u16(16)?;
+        buff.write_u128(addr.to_bits())?;
+      },
+    }
+
+    Ok(())
   }
 }

@@ -19,6 +19,10 @@ impl Buffer {
     Self { pos: 0, data }
   }
 
+  pub fn get_data(&self) -> [u8; 512] {
+    self.data
+  }
+
   pub fn get_pos(&self) -> usize {
     self.pos
   }
@@ -108,6 +112,25 @@ impl Buffer {
     Ok(())
   }
 
+  pub fn write_vec(&mut self, data: &Vec<u8>) -> Result<(), DrasilDNSError> {
+    for b in data {
+      self.write_u8(*b)?;
+    }
+    Ok(())
+  }
+
+  pub fn set_u16(&mut self, pos: usize, val: u16) -> Result<(), DrasilDNSError> {
+    if pos > 512 {
+      return Err(DrasilDNSError::EOF);
+    }
+
+    let old_pos = self.pos;
+    self.pos = pos;
+    let res = self.write_u16(val);
+    self.pos = old_pos;
+    res
+  }
+
   pub fn read_labels(&mut self) -> Result<Vec<String>, DrasilDNSError> {
     let mut labels = vec![];
     let mut i: usize = self.pos;
@@ -156,7 +179,7 @@ impl Buffer {
     Ok(labels)
   }
 
-  pub fn write_labels(&mut self, labels: Vec<String>) -> Result<(), DrasilDNSError> {
+  pub fn write_labels(&mut self, labels: &Vec<String>) -> Result<(), DrasilDNSError> {
     for label in labels {
       let len = label.len() as u8;
       if len > 63 {

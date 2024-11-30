@@ -63,4 +63,27 @@ impl Packet {
       additional,
     })
   }
+
+  pub fn to_bytes(&self) -> Result<[u8; 512], DrasilDNSError> {
+    let mut buff = Buffer::default();
+    self.header.write_bytes(&mut buff)?;
+
+    for q in &self.questions {
+      q.write_bytes(&mut buff)?;
+    }
+
+    for r in &self.answers {
+      r.write_bytes(&mut buff)?;
+    }
+
+    for r in &self.authority {
+      r.write_bytes(&mut buff)?;
+    }
+
+    for r in &self.additional {
+      r.write_bytes(&mut buff)?;
+    }
+
+    Ok(buff.get_data())
+  }
 }
