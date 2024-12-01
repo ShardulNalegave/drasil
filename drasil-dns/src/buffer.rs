@@ -5,22 +5,23 @@ use crate::error::DrasilDNSError;
 
 pub(crate) struct Buffer {
   pos: usize,
-  data: [u8; 512],
+  size: usize,
+  data: Vec<u8>,
 }
 
 impl Default for Buffer {
   fn default() -> Self {
-    Self { pos: 0, data: [0; 512] }
+    Self { pos: 0, size: 512, data: vec![0; 512] }
   }
 }
 
 impl Buffer {
-  pub fn new(data: [u8; 512]) -> Self {
-    Self { pos: 0, data }
+  pub fn new(data: Vec<u8>) -> Self {
+    Self { pos: 0, size: data.len(), data }
   }
 
-  pub fn get_data(&self) -> [u8; 512] {
-    self.data
+  pub fn get_data(&self) -> &[u8] {
+    &self.data
   }
 
   pub fn get_pos(&self) -> usize {
@@ -32,7 +33,7 @@ impl Buffer {
   }
 
   pub fn get_range(&mut self, from: usize, len: usize) -> Result<&[u8], DrasilDNSError> {
-    if (from + len) > 512 {
+    if (from + len) > self.size {
       return Err(DrasilDNSError::EOF);
     }
 
@@ -40,7 +41,7 @@ impl Buffer {
   }
 
   pub fn get_u8(&mut self) -> Result<u8, DrasilDNSError> {
-    if self.pos > 512 {
+    if self.pos > self.size {
       return Err(DrasilDNSError::EOF);
     }
 
@@ -81,7 +82,7 @@ impl Buffer {
   }
 
   pub fn write_u8(&mut self, val: u8) -> Result<(), DrasilDNSError> {
-    if self.pos > 512 {
+    if self.pos > self.size {
       return Err(DrasilDNSError::EOF);
     }
 
@@ -127,7 +128,7 @@ impl Buffer {
   }
 
   pub fn set_u16(&mut self, pos: usize, val: u16) -> Result<(), DrasilDNSError> {
-    if pos > 512 {
+    if pos > self.size {
       return Err(DrasilDNSError::EOF);
     }
 

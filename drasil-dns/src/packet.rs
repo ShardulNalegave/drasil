@@ -4,7 +4,11 @@ pub mod builder;
 
 // ===== Imports =====
 use crate::{
-  buffer::Buffer, error::DrasilDNSError, header::Header, question::Question, record::Record
+  buffer::Buffer,
+  error::DrasilDNSError,
+  header::Header,
+  question::Question,
+  record::Record,
 };
 // ===================
 
@@ -22,12 +26,7 @@ pub struct Packet {
 impl Packet {
   /// Get a DNS packet from bytes.
   pub fn parse(data: &[u8]) -> Result<Self, DrasilDNSError> {
-    if data.len() != 512 {
-      return Err(DrasilDNSError::InvalidPacketSize { size: data.len() });
-    }
-
-    let data: [u8; 512] = data[0..512].try_into().unwrap(); // unwrap is safe as we have already checked for size
-    let mut buff = Buffer::new(data);
+    let mut buff = Buffer::new(data.to_vec());
 
     let header = Header::parse(&mut buff)?;
 
@@ -66,7 +65,7 @@ impl Packet {
   }
 
   /// Convert a DNS packet into bytes
-  pub fn to_bytes(&self) -> Result<[u8; 512], DrasilDNSError> {
+  pub fn to_bytes(&self) -> Result<Vec<u8>, DrasilDNSError> {
     let mut buff = Buffer::default();
     self.header.write_bytes(&mut buff)?;
 
@@ -86,6 +85,6 @@ impl Packet {
       r.write_bytes(&mut buff)?;
     }
 
-    Ok(buff.get_data())
+    Ok(buff.get_data().to_vec())
   }
 }
