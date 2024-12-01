@@ -1,6 +1,5 @@
 
 pub mod config;
-pub mod constants;
 
 // ===== Imports =====
 #[macro_use] extern crate log;
@@ -31,7 +30,7 @@ async fn main() -> Result<()> {
   loop {
     let mut buff = [0; 512];
     let (_len, _from) = lis.recv_from(&mut buff).await?;
-    let packet = drasil_dns::packet::Packet::parse(buff);
+    let packet = drasil_dns::packet::Packet::parse(&buff)?;
     println!("{:#?}", packet);
   }
 }

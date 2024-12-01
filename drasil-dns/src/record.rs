@@ -1,12 +1,15 @@
 
+/// Provides eDNS types
+pub mod edns;
+
 // ===== Imports =====
 use std::net::{Ipv4Addr, Ipv6Addr};
-use crate::{buffer::Buffer, common::{RecordClass, RecordType}, error::DrasilDNSError};
+use crate::{buffer::Buffer, common::{RecordClass, RecordType}, error::DrasilDNSError, record::edns::EDNSOption};
 // ===================
 
 /// # Record
 /// Enum for representing various kinds of DNS records that exist.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Record {
   Unknown {
     domain: Vec<String>,
@@ -57,6 +60,14 @@ pub enum Record {
     ttl: u32,
     class: RecordClass,
   }, // 28
+
+  OPT {
+    udp_payload_size: u16,
+    extended_rcode: u8,
+    version: u8,
+    dnssec_ok: bool,
+    options: Vec<EDNSOption>,
+  }, // 41
 }
 
 impl Record {
@@ -79,6 +90,34 @@ impl Record {
           data: data.to_vec(),
         }
       },
+
+      RecordType::OPT => {
+        buff.seek(buff.get_pos() - 10);
+
+        let udp_payload_size = buff.get_u16()?;
+        let extended_rcode = buff.get_u8()?;
+        let version = buff.get_u8()?;
+
+        let reserved = buff.get_u16()?;
+        let dnssec_ok = (reserved & 0x8000) >> 15 == 1;
+
+        let data_length = buff.get_u16()?;
+        println!("{}", data_length);
+
+        let pos = buff.get_pos();
+        let mut options = vec![];
+
+        loop {
+          let opt = EDNSOption::parse(buff)?;
+          options.push(opt);
+
+          if buff.get_pos() - pos >= (data_length as usize) {
+            break;
+          }
+        }
+
+        Self::OPT { udp_payload_size, extended_rcode, version, dnssec_ok, options }
+      }
 
       RecordType::A => {
         let addr = Ipv4Addr::from_bits(buff.get_u32()?);
@@ -125,6 +164,30 @@ impl Record {
         buff.write_u32(*len)?;
         buff.write_vec(data)?;
       },
+
+      Record::OPT {
+        udp_payload_size,
+        extended_rcode,
+        version,
+        dnssec_ok,
+        options,
+      } => {
+        buff.write_u8(0)?; // set domain to empty (0)
+        buff.write_u16(RecordType::OPT.into())?;
+        buff.write_u16(*udp_payload_size)?;
+        buff.write_u8(*extended_rcode)?;
+        buff.write_u8(*version)?;
+        buff.write_u16(if *dnssec_ok { 0x8000 } else { 0x0000 })?;
+        
+        let pos = buff.get_pos();
+        buff.write_u16(0)?;
+
+        for opt in options {
+          opt.write_bytes(buff)?;
+        }
+
+        buff.set_u16(pos, (buff.get_pos() - (pos + 2)) as u16)?;
+      }
 
       Record::A {
         domain,

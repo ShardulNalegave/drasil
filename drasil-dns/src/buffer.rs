@@ -64,6 +64,14 @@ impl Buffer {
     Ok(u32::from_be_bytes(bytes))
   }
 
+  pub fn get_u64(&mut self) -> Result<u64, DrasilDNSError> {
+    let mut bytes = [0; 8];
+    for i in 0..8 {
+      bytes[i] = self.get_u8()?;
+    }
+    Ok(u64::from_be_bytes(bytes))
+  }
+
   pub fn get_u128(&mut self) -> Result<u128, DrasilDNSError> {
     let mut bytes = [0; 16];
     for i in 0..16 {
@@ -91,6 +99,13 @@ impl Buffer {
   }
 
   pub fn write_u32(&mut self, val: u32) -> Result<(), DrasilDNSError> {
+    for byte in val.to_be_bytes() {
+      self.write_u8(byte)?;
+    }
+    Ok(())
+  }
+
+  pub fn write_u64(&mut self, val: u64) -> Result<(), DrasilDNSError> {
     for byte in val.to_be_bytes() {
       self.write_u8(byte)?;
     }

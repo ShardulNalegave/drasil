@@ -16,4 +16,6 @@ pub enum DrasilDNSError {
   LabelTooLarge,
   #[error("reached the end while parsing the packet, please ensure packet data is correct")]
   EOF,
+  #[error("encountered an OPT record used for eDNS. Currently, we don't have support for eDNS")]
+  OPTRecordEncountered,
 }

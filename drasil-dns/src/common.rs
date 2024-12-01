@@ -37,6 +37,7 @@ pub enum RecordType {
   CNAME = 5,
   MX = 15,
   AAAA = 28,
+  OPT = 41, // used for eDNS
 }
 
 impl Into<u16> for RecordType {
@@ -47,6 +48,7 @@ impl Into<u16> for RecordType {
       Self::CNAME => 5,
       Self::MX => 15,
       Self::AAAA => 28,
+      Self::OPT => 41,
       Self::Unknown(v) => v,
     }
   }
@@ -60,6 +62,7 @@ impl From<u16> for RecordType {
       5 => Self::CNAME,
       15 => Self::MX,
       28 => Self::AAAA,
+      41 => Self::OPT,
       v => Self::Unknown(v),
     }
   }
