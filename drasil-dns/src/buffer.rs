@@ -3,6 +3,9 @@
 use crate::error::DrasilDNSError;
 // ===================
 
+/// # Buffer
+/// Custom reader and writer for byte buffers.
+/// All operations are atomic for both reads and writes.
 pub(crate) struct Buffer {
   pos: usize,
   size: usize,
@@ -11,36 +14,72 @@ pub(crate) struct Buffer {
 
 impl Default for Buffer {
   fn default() -> Self {
-    Self { pos: 0, size: 512, data: vec![0; 512] }
+    Self { pos: 0, size: 512, data: vec![0; 512] } // DNS packet size is 512 bytes acc. to original spec
+  }
+}
+
+impl From<Vec<u8>> for Buffer {
+  fn from(data: Vec<u8>) -> Self {
+    Self { pos: 0, size: data.len(), data }
+  }
+}
+
+impl Into<Vec<u8>> for Buffer {
+  fn into(self) -> Vec<u8> {
+    self.data
   }
 }
 
 impl Buffer {
-  pub fn new(data: Vec<u8>) -> Self {
-    Self { pos: 0, size: data.len(), data }
-  }
-
-  pub fn get_data(&self) -> &[u8] {
-    &self.data
-  }
-
-  pub fn get_pos(&self) -> usize {
+  /// Returns current position of the buffer
+  pub fn pos(&self) -> usize {
     self.pos
   }
 
+  /// Sets current position of the buffer
   pub fn seek(&mut self, pos: usize) {
     self.pos = pos;
   }
 
-  pub fn get_range(&mut self, from: usize, len: usize) -> Result<&[u8], DrasilDNSError> {
-    if (from + len) > self.size {
+  /// Sets given slice data in the buffer from the provided position.
+  /// This is an atomic operation, in case the write fails at any point the position and half-written data will be reset.
+  pub fn set_bytes(&mut self, at: usize, bytes: &[u8]) -> Result<(), DrasilDNSError> {
+    if (at + bytes.len()) > self.size {
       return Err(DrasilDNSError::EOF);
     }
 
-    Ok(&self.data[from..(from + len)])
+    for b in bytes {
+      if let Err(DrasilDNSError::EOF) = self.write_u8(*b) {
+        let i = self.pos - at;
+        self.set_bytes(at, &vec![0; i])?;
+        self.pos -= i;
+
+        return Err(DrasilDNSError::WriteFailed);
+      }
+    }
+
+    Ok(())
   }
 
-  pub fn get_u8(&mut self) -> Result<u8, DrasilDNSError> {
+  /// Reads `len` number of bytes from the current position.
+  pub fn read_bytes(&mut self, len: usize) -> Result<&[u8], DrasilDNSError> {
+    if (self.pos + len) > self.size {
+      return Err(DrasilDNSError::EOF);
+    }
+
+    let bytes = &self.data[self.pos..(self.pos+len)];
+    self.pos += len;
+    Ok(bytes)
+  }
+
+  /// Write given bytes starting from current position
+  pub fn write_bytes(&mut self, bytes: &[u8]) -> Result<(), DrasilDNSError> {
+    self.set_bytes(self.pos, bytes)?;
+    Ok(())
+  }
+
+  /// Reads a single byte
+  pub fn read_u8(&mut self) -> Result<u8, DrasilDNSError> {
     if self.pos > self.size {
       return Err(DrasilDNSError::EOF);
     }
@@ -51,36 +90,31 @@ impl Buffer {
     Ok(byte)
   }
 
-  pub fn get_u16(&mut self) -> Result<u16, DrasilDNSError> {
-    let high = self.get_u8()?;
-    let low = self.get_u8()?;
-    Ok(u16::from_be_bytes([high, low]))
+  /// Reads a `u16`
+  pub fn read_u16(&mut self) -> Result<u16, DrasilDNSError> {
+    let bytes: [u8; 2] = self.read_bytes(2)?.try_into().unwrap(); // is safe because returned slice's length is already known
+    Ok(u16::from_be_bytes(bytes))
   }
 
-  pub fn get_u32(&mut self) -> Result<u32, DrasilDNSError> {
-    let mut bytes = [0; 4];
-    for i in 0..4 {
-      bytes[i] = self.get_u8()?;
-    }
+  /// Reads a `u32`
+  pub fn read_u32(&mut self) -> Result<u32, DrasilDNSError> {
+    let bytes: [u8; 4] = self.read_bytes(4)?.try_into().unwrap(); // is safe because returned slice's length is already known
     Ok(u32::from_be_bytes(bytes))
   }
 
-  pub fn get_u64(&mut self) -> Result<u64, DrasilDNSError> {
-    let mut bytes = [0; 8];
-    for i in 0..8 {
-      bytes[i] = self.get_u8()?;
-    }
+  /// Reads a `u64`
+  pub fn read_u64(&mut self) -> Result<u64, DrasilDNSError> {
+    let bytes: [u8; 8] = self.read_bytes(8)?.try_into().unwrap(); // is safe because returned slice's length is already known
     Ok(u64::from_be_bytes(bytes))
   }
 
-  pub fn get_u128(&mut self) -> Result<u128, DrasilDNSError> {
-    let mut bytes = [0; 16];
-    for i in 0..16 {
-      bytes[i] = self.get_u8()?;
-    }
+  /// Reads a `u128`
+  pub fn read_u128(&mut self) -> Result<u128, DrasilDNSError> {
+    let bytes: [u8; 16] = self.read_bytes(16)?.try_into().unwrap(); // is safe because returned slice's length is already known
     Ok(u128::from_be_bytes(bytes))
   }
 
+  /// Writes a single byte
   pub fn write_u8(&mut self, val: u8) -> Result<(), DrasilDNSError> {
     if self.pos > self.size {
       return Err(DrasilDNSError::EOF);
@@ -92,54 +126,39 @@ impl Buffer {
     Ok(())
   }
 
+  /// Writes a `u16`
   pub fn write_u16(&mut self, val: u16) -> Result<(), DrasilDNSError> {
-    let [high, low] = val.to_be_bytes();
-    self.write_u8(high)?;
-    self.write_u8(low)?;
+    let bytes = val.to_be_bytes();
+    self.write_bytes(&bytes)?;
     Ok(())
   }
 
+  /// Writes a `u32`
   pub fn write_u32(&mut self, val: u32) -> Result<(), DrasilDNSError> {
-    for byte in val.to_be_bytes() {
-      self.write_u8(byte)?;
-    }
+    let bytes = val.to_be_bytes();
+    self.write_bytes(&bytes)?;
     Ok(())
   }
 
+  /// Writes a `u64`
   pub fn write_u64(&mut self, val: u64) -> Result<(), DrasilDNSError> {
-    for byte in val.to_be_bytes() {
-      self.write_u8(byte)?;
-    }
+    let bytes = val.to_be_bytes();
+    self.write_bytes(&bytes)?;
     Ok(())
   }
 
+  /// Writes a `u128`
   pub fn write_u128(&mut self, val: u128) -> Result<(), DrasilDNSError> {
-    for byte in val.to_be_bytes() {
-      self.write_u8(byte)?;
-    }
+    let bytes = val.to_be_bytes();
+    self.write_bytes(&bytes)?;
     Ok(())
   }
 
-  pub fn write_vec(&mut self, data: &Vec<u8>) -> Result<(), DrasilDNSError> {
-    for b in data {
-      self.write_u8(*b)?;
-    }
-    Ok(())
-  }
+  /// Reads series of labels stored in buffer starting from current position.
+  /// Returns the number of bytes read and the labels.
+  pub fn read_labels(&mut self) -> Result<(usize, Vec<String>), DrasilDNSError> {
+    let initial_pos = self.pos;
 
-  pub fn set_u16(&mut self, pos: usize, val: u16) -> Result<(), DrasilDNSError> {
-    if pos > self.size {
-      return Err(DrasilDNSError::EOF);
-    }
-
-    let old_pos = self.pos;
-    self.pos = pos;
-    let res = self.write_u16(val);
-    self.pos = old_pos;
-    res
-  }
-
-  pub fn read_labels(&mut self) -> Result<Vec<String>, DrasilDNSError> {
     let mut labels = vec![];
     let mut i: usize = self.pos;
     
@@ -184,23 +203,31 @@ impl Buffer {
       self.seek(i);
     }
 
-    Ok(labels)
+    Ok((self.pos - initial_pos, labels))
   }
 
-  pub fn write_labels(&mut self, labels: &Vec<String>) -> Result<(), DrasilDNSError> {
+  /// Writes the provided labels to the buffer
+  pub fn write_labels(&mut self, labels: &Vec<String>) -> Result<usize, DrasilDNSError> {
+    let mut total_len = 0;
+
     for label in labels {
-      let len = label.len() as u8;
+      let label_bytes = label.as_bytes();
+      let len = label_bytes.len() as u8;
+      total_len += len as usize + 1;
+
       if len > 63 {
         return Err(DrasilDNSError::LabelTooLarge);
       }
 
       self.write_u8(len)?;
-      for b in label.as_bytes() {
+      for b in label_bytes {
         self.write_u8(*b)?;
       }
     }
 
     self.write_u8(0)?;
-    Ok(())
+    total_len += 1;
+
+    Ok(total_len)
   }
 }
