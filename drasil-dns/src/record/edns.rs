@@ -115,43 +115,39 @@ pub enum EDNSOption {
 
 impl EDNSOption {
   pub(crate) fn parse(buff: &mut Buffer) -> Result<EDNSOption, DrasilDNSError> {
-    let code = buff.get_u16()?;
-    let len = buff.get_u16()?;
+    let code = buff.read_u16()?;
+    let len = buff.read_u16()?;
 
     Ok(match code {
       3 => {
-        let mut data = vec![];
-        for _ in 0..(len - 2) {
-          data.push(buff.get_u8()?);
-        }
-
+        let data = buff.read_bytes(len as usize - 2)?;
         Self::NSID { data: String::from_utf8_lossy(&data).to_string() }
       },
 
       8 => {
-        let family = buff.get_u16()?;
-        let source_netmask = buff.get_u8()?;
-        let scope_netmask = buff.get_u8()?;
+        let family = buff.read_u16()?;
+        let source_netmask = buff.read_u8()?;
+        let scope_netmask = buff.read_u8()?;
         let mut addr = 0_u128;
 
         if family == 1 { // ipv4
-          assert!(source_netmask <= 128, "invalid source netmask in OPT");
-          assert!(scope_netmask <= 128, "invalid scope netmask in OPT");
+          assert!(source_netmask <= 32, "invalid source netmask in OPT");
+          assert!(scope_netmask <= 32, "invalid scope netmask in OPT");
         } else if family == 2 { // ipv6
           assert!(source_netmask <= 128, "invalid source netmask in OPT");
           assert!(scope_netmask <= 128, "invalid scope netmask in OPT");
         }
 
         if source_netmask <= 8 {
-          addr = buff.get_u8()? as u128;
+          addr = buff.read_u8()? as u128;
         } else if source_netmask <= 16 {
-          addr = buff.get_u16()? as u128;
+          addr = buff.read_u16()? as u128;
         } else if source_netmask <= 32 {
-          addr = buff.get_u32()? as u128;
+          addr = buff.read_u32()? as u128;
         } else if source_netmask <= 64 {
-          addr = buff.get_u64()? as u128;
+          addr = buff.read_u64()? as u128;
         } else if source_netmask <= 128 {
-          addr = buff.get_u128()? as u128;
+          addr = buff.read_u128()? as u128;
         }
 
         Self::ClientSubnet { family, source_netmask, scope_netmask, addr }
@@ -160,10 +156,10 @@ impl EDNSOption {
       10 => {
         assert!(len == 8 || len == 16, "Cookie option length should be 8 or 16");
 
-        let client = buff.get_u64()?;
+        let client = buff.read_u64()?;
         let mut server = None;
         if len == 16 {
-          server = Some(buff.get_u64()?);
+          server = Some(buff.read_u64()?);
         }
 
         Self::Cookie { client, server }
@@ -172,20 +168,20 @@ impl EDNSOption {
       11 => {
         assert!(len == 2, "KeepAlive option length should be 2");
 
-        let timeout = buff.get_u16()?;
+        let timeout = buff.read_u16()?;
         Self::KeepAlive { timeout }
       },
 
       12 => {
-        buff.seek(buff.get_pos() + (len as usize));
+        buff.seek(buff.pos() + (len as usize));
         Self::Padding { len }
       },
 
       13 => {
         assert!(len == 4, "ChainQuery option length should be 4");
 
-        let flags = buff.get_u16()?;
-        let qname_min_length = buff.get_u16()?;
+        let flags = buff.read_u16()?;
+        let qname_min_length = buff.read_u16()?;
 
         Self::ChainQuery { flags, qname_min_length }
       },
@@ -195,40 +191,36 @@ impl EDNSOption {
 
         let mut tags = vec![];
         for _ in 0..(len % 2) {
-          tags.push(buff.get_u16()?);
+          tags.push(buff.read_u16()?);
         }
 
         Self::KeyTag { tags }
       },
 
       15 => {
-        let info_code = buff.get_u16()?;
-        let mut extra_text = vec![];
- 
-        for _ in 0..(len - 2) {
-          extra_text.push(buff.get_u8()?);
-        }
+        let info_code = buff.read_u16()?;
+        let extra_text = buff.read_bytes(len as usize - 2)?;
 
-        Self::EDE { info_code, extra_text: String::from_utf8_lossy(&extra_text).to_string() }
+        Self::EDE { info_code, extra_text: String::from_utf8_lossy(extra_text).to_string() }
       },
 
       16 => {
-        let family = buff.get_u16()?;
-        let source_netmask = buff.get_u8()?;
-        let scope_netmask = buff.get_u8()?;
+        let family = buff.read_u16()?;
+        let source_netmask = buff.read_u8()?;
+        let scope_netmask = buff.read_u8()?;
 
         if family == 1 { // ipv4
-          assert!(source_netmask <= 128, "invalid source netmask in OPT");
-          assert!(scope_netmask <= 128, "invalid scope netmask in OPT");
+          assert!(source_netmask <= 32, "invalid source netmask in OPT");
+          assert!(scope_netmask <= 32, "invalid scope netmask in OPT");
 
-          let addr = buff.get_u32()?;
+          let addr = buff.read_u32()?;
           Self::EcsIPv4 { source_netmask, scope_netmask, addr }
 
         } else if family == 2 { // ipv6
           assert!(source_netmask <= 128, "invalid source netmask in OPT");
           assert!(scope_netmask <= 128, "invalid scope netmask in OPT");
 
-          let addr = buff.get_u128()?;
+          let addr = buff.read_u128()?;
           Self::EcsIPv6 { source_netmask, scope_netmask, addr }
         } else {
           unreachable!()
@@ -236,8 +228,7 @@ impl EDNSOption {
       },
       
       code => {
-        let data = buff.get_range(buff.get_pos(), len as usize)?.to_vec();
-        buff.seek(buff.get_pos() + (len as usize));
+        let data = buff.read_bytes(len as usize)?.to_vec();
         Self::Unknown { code, len, data }
       },
     })
@@ -250,115 +241,150 @@ impl EDNSOption {
         len,
         data,
       } => {
-        buff.write_u16(*code)?;
-        buff.write_u16(*len)?;
-        buff.write_vec(data)?;
+        let mut b = Buffer::with_capacity(4 + *len as usize);
+        b.write_u16(*code)?;
+        b.write_u16(*len)?;
+        b.write_bytes(&data)?;
+        buff.write_buffer(&b)?;
       },
 
       EDNSOption::NSID { data } => {
         let len = data.len() as u16;
 
-        buff.write_u16(EDNSOptionType::NSID.into())?;
-        buff.write_u16(len)?;
-        buff.write_vec(&data.as_bytes().to_vec())?;
+        let mut b = Buffer::with_capacity(4 + len as usize);
+        b.write_u16(EDNSOptionType::NSID.into())?;
+        b.write_u16(len)?;
+        b.write_bytes(data.as_bytes())?;
+        buff.write_buffer(&b)?;
       },
 
       EDNSOption::ClientSubnet { family, source_netmask, scope_netmask, addr } => {
-        buff.write_u16(EDNSOptionType::ClientSubnet.into())?;
+        let len = 4 + {
+          if *source_netmask <= 8 { 1 }
+          else if *source_netmask <= 16 { 2 }
+          else if *source_netmask <= 32 { 4 }
+          else if *source_netmask <= 64 { 8 }
+          else if *source_netmask <= 128 { 16 }
+          else { unreachable!() }
+        };
 
-        let mut len = 4;
-        let len_pos = buff.get_pos();
-        buff.write_u16(0)?;
+        let mut b = Buffer::with_capacity(4 + len as usize);
 
-        buff.write_u16(*family)?;
-        buff.write_u8(*source_netmask)?;
-        buff.write_u8(*scope_netmask)?;
+        b.write_u16(EDNSOptionType::ClientSubnet.into())?;
+        b.write_u16(len)?;
+
+        b.write_u16(*family)?;
+        b.write_u8(*source_netmask)?;
+        b.write_u8(*scope_netmask)?;
 
         if *source_netmask <= 8 {
-          buff.write_u8(*addr as u8)?;
-          len += 1;
+          b.write_u8(*addr as u8)?;
         } else if *source_netmask <= 16 {
-          buff.write_u16(*addr as u16)?;
-          len += 2;
+          b.write_u16(*addr as u16)?;
         } else if *source_netmask <= 32 {
-          buff.write_u32(*addr as u32)?;
-          len += 4;
+          b.write_u32(*addr as u32)?;
         } else if *source_netmask <= 64 {
-          buff.write_u64(*addr as u64)?;
-          len += 8;
+          b.write_u64(*addr as u64)?;
         } else if *source_netmask <= 128 {
-          buff.write_u128(*addr)?;
-          len += 16;
+          b.write_u128(*addr)?;
         }
 
-        buff.set_u16(len_pos, len)?;
+        buff.write_buffer(&b)?;
       },
 
       EDNSOption::Cookie { client, server } => {
-        buff.write_u16(EDNSOptionType::Cookie.into())?;
-        buff.write_u16(if server.is_some() { 16 } else { 8 })?;
-        buff.write_u64(*client)?;
+        let len = if server.is_some() { 16 } else { 8 };
+        let mut b = Buffer::with_capacity(4 + len as usize);
+
+        b.write_u16(EDNSOptionType::Cookie.into())?;
+        b.write_u16(len)?;
+        b.write_u64(*client)?;
         if let Some(server) = server {
-          buff.write_u64(*server)?;
+          b.write_u64(*server)?;
         }
+
+        buff.write_buffer(&b)?;
       },
 
       EDNSOption::KeepAlive { timeout } => {
-        buff.write_u16(EDNSOptionType::KeepAlive.into())?;
-        buff.write_u16(2)?;
-        buff.write_u16(*timeout)?;
+        let mut b = Buffer::with_capacity(6);
+        b.write_u16(EDNSOptionType::KeepAlive.into())?;
+        b.write_u16(2)?;
+        b.write_u16(*timeout)?;
+        buff.write_buffer(&b)?;
       },
 
       EDNSOption::Padding { len } => {
-        buff.write_u16(EDNSOptionType::Padding.into())?;
-        buff.write_u16(*len)?;
+        let mut b = Buffer::with_capacity(4 + *len as usize);
+        b.write_u16(EDNSOptionType::Padding.into())?;
+        b.write_u16(*len)?;
         
         for _ in 0..(*len) {
-          buff.write_u8(0)?;
+          b.write_u8(0)?;
         }
+
+        buff.write_buffer(&b)?;
       },
 
       EDNSOption::ChainQuery { flags, qname_min_length } => {
-        buff.write_u16(EDNSOptionType::ChainQuery.into())?;
-        buff.write_u16(4)?;
-        buff.write_u16(*flags)?;
-        buff.write_u16(*qname_min_length)?;
+        let mut b = Buffer::with_capacity(8);
+        b.write_u16(EDNSOptionType::ChainQuery.into())?;
+        b.write_u16(4)?;
+        b.write_u16(*flags)?;
+        b.write_u16(*qname_min_length)?;
+        buff.write_buffer(&b)?;
       },
 
       EDNSOption::KeyTag { tags } => {
-        buff.write_u16(EDNSOptionType::KeyTag.into())?;
-        buff.write_u16(2 * tags.len() as u16)?;
+        let len = 2 * tags.len() as u16;
+        let mut b = Buffer::with_capacity(4 + len as usize);
+
+        b.write_u16(EDNSOptionType::KeyTag.into())?;
+        b.write_u16(len)?;
 
         for tag in tags {
-          buff.write_u16(*tag)?;
+          b.write_u16(*tag)?;
         }
+
+        buff.write_buffer(&b)?;
       },
       
       EDNSOption::EDE { info_code, extra_text } => {
         let len = 2 + extra_text.len() as u16;
+        let mut b = Buffer::with_capacity(4 + len as usize);
 
-        buff.write_u16(EDNSOptionType::EDE.into())?;
-        buff.write_u16(len)?;
-        buff.write_u16(*info_code)?;
-        buff.write_vec(&extra_text.as_bytes().to_vec())?;
+        b.write_u16(EDNSOptionType::EDE.into())?;
+        b.write_u16(len)?;
+        b.write_u16(*info_code)?;
+        b.write_bytes(extra_text.as_bytes())?;
+        
+        buff.write_buffer(&b)?;
       },
 
       EDNSOption::EcsIPv4 { source_netmask, scope_netmask, addr } => {
-        buff.write_u16(EDNSOptionType::ECS.into())?;
-        buff.write_u16(10)?;
-        buff.write_u16(1)?;
-        buff.write_u8(*source_netmask)?;
-        buff.write_u8(*scope_netmask)?;
-        buff.write_u32(*addr)?;
+        let mut b = Buffer::with_capacity(14);
+
+        b.write_u16(EDNSOptionType::ECS.into())?;
+        b.write_u16(10)?;
+        b.write_u16(1)?;
+        b.write_u8(*source_netmask)?;
+        b.write_u8(*scope_netmask)?;
+        b.write_u32(*addr)?;
+
+        buff.write_buffer(&b)?;
       },
 
       EDNSOption::EcsIPv6 { source_netmask, scope_netmask, addr } => {
-        buff.write_u16(EDNSOptionType::ECS.into())?;
-        buff.write_u16(20)?;
-        buff.write_u16(2)?;
-        buff.write_u8(*source_netmask)?;
-        buff.write_u8(*scope_netmask)?;
-        buff.write_u128(*addr)?;
+        let mut b = Buffer::with_capacity(24);
+
+        b.write_u16(EDNSOptionType::ECS.into())?;
+        b.write_u16(20)?;
+        b.write_u16(2)?;
+        b.write_u8(*source_netmask)?;
+        b.write_u8(*scope_netmask)?;
+        b.write_u128(*addr)?;
+
+        buff.write_buffer(&b)?;
       },
     }
 

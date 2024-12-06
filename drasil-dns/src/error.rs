@@ -16,6 +16,6 @@ pub enum DrasilDNSError {
   LabelTooLarge,
   #[error("reached the end while parsing the packet, please ensure packet data is correct")]
   EOF,
-  #[error("there was a error during write, resetting current pointer")]
-  WriteFailed,
+  #[error("there was a error during write, resetting current pointer: {error:?}")]
+  WriteFailed { error: Box<DrasilDNSError> },
 }

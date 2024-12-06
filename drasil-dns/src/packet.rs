@@ -26,7 +26,7 @@ pub struct Packet {
 impl Packet {
   /// Get a DNS packet from bytes.
   pub fn parse(data: &[u8]) -> Result<Self, DrasilDNSError> {
-    let mut buff = Buffer::new(data.to_vec());
+    let mut buff: Buffer = data.into();
 
     let header = Header::parse(&mut buff)?;
 
@@ -85,6 +85,6 @@ impl Packet {
       r.write_bytes(&mut buff)?;
     }
 
-    Ok(buff.get_data().to_vec())
+    Ok(buff.into())
   }
 }

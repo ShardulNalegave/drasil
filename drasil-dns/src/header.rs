@@ -67,12 +67,12 @@ pub struct Header {
 
 impl Header {
   pub(crate) fn parse(buff: &mut Buffer) -> Result<Header, DrasilDNSError> {
-    let id = buff.get_u16()?;
-    let [flag_high, flag_low] = buff.get_u16()?.to_be_bytes();
-    let question_count = buff.get_u16()?;
-    let answer_count = buff.get_u16()?;
-    let authority_count = buff.get_u16()?;
-    let additional_count = buff.get_u16()?;
+    let id = buff.read_u16()?;
+    let [flag_high, flag_low] = buff.read_u16()?.to_be_bytes();
+    let question_count = buff.read_u16()?;
+    let answer_count = buff.read_u16()?;
+    let authority_count = buff.read_u16()?;
+    let additional_count = buff.read_u16()?;
 
     let request_kind = RequestKind::from(flag_high >> 7);
     let opcode = (flag_high & 0b01111000) >> 3;

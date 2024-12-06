@@ -14,9 +14,9 @@ pub struct Question {
 
 impl Question {
   pub(crate) fn parse(buff: &mut Buffer) -> Result<Self, DrasilDNSError> {
-    let name = buff.read_labels()?;
-    let record_type = RecordType::from(buff.get_u16()?);
-    let record_class = RecordClass::from(buff.get_u16()?);
+    let (_, name) = buff.read_labels()?;
+    let record_type = RecordType::from(buff.read_u16()?);
+    let record_class = RecordClass::from(buff.read_u16()?);
 
     Ok(Self { name, record_type, record_class })
   }
