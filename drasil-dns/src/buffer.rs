@@ -53,6 +53,11 @@ impl Buffer {
     self.expandable
   }
 
+  /// Tells whether `Buffer` is at EOF position
+  pub fn is_eof(&self) -> bool {
+    self.pos >= self.capacity
+  }
+
   /// Returns current position of the buffer
   pub fn pos(&self) -> usize {
     self.pos
@@ -206,7 +211,7 @@ impl Buffer {
 
   /// Reads series of labels stored in buffer starting from current position.
   /// Returns the number of bytes read and the labels.
-  pub fn read_labels(&mut self) -> Result<(usize, Vec<String>), DrasilDNSError> {
+  pub fn read_labels(&mut self, use_jumps: bool) -> Result<(usize, Vec<String>), DrasilDNSError> {
     let initial_pos = self.pos;
 
     let mut labels = vec![];
@@ -224,7 +229,7 @@ impl Buffer {
         },
       };
 
-      if (len & 0b11000000) == 0b11000000 { // jump
+      if (len & 0b11000000) == 0b11000000 && use_jumps { // jump
         if jumps >= max_jumps {
           return Err(DrasilDNSError::TooManyJumpsInLabelSequence);
         }
@@ -249,6 +254,9 @@ impl Buffer {
         i += 1;
         if len == 0 {
           break;
+        } else if len > 63 {
+          self.pos = initial_pos;
+          return Err(DrasilDNSError::LabelTooLarge);
         }
 
         let mut buff = vec![];

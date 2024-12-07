@@ -3,8 +3,8 @@
 pub mod edns;
 
 // ===== Imports =====
-use std::net::{Ipv4Addr, Ipv6Addr};
-use crate::{buffer::Buffer, common::{RecordClass, RecordType}, error::DrasilDNSError, record::edns::EDNSOption};
+use std::{collections::HashSet, net::{Ipv4Addr, Ipv6Addr}};
+use crate::{buffer::Buffer, error::DrasilDNSError, record::edns::EDNSOption, types::{dnssec::{DNSSECAlgorithm, DNSSECDigestType}, RecordClass, RecordType}};
 // ===================
 
 /// # Record
@@ -69,12 +69,22 @@ pub enum Record {
     options: Vec<EDNSOption>,
   }, // 41
 
+  DS {
+    domain: Vec<String>,
+    class: RecordClass,
+    ttl: u32,
+    key_tag: u16,
+    algorithm: DNSSECAlgorithm,
+    digest_type: DNSSECDigestType,
+    digest: Vec<u8>,
+  }, // 43
+
   RRSIG {
     domain: Vec<String>,
     class: RecordClass,
     ttl: u32,
     type_covered: u16,
-    algorithm: u8,
+    algorithm: DNSSECAlgorithm,
     labels: u8,
     original_ttl: u32,
     signature_expiration: u32,
@@ -84,6 +94,14 @@ pub enum Record {
     signature: Vec<u8>,
   }, // 46
 
+  NSEC {
+    domain: Vec<String>,
+    class: RecordClass,
+    ttl: u32,
+    next_domain_name: Vec<String>,
+    record_types: HashSet<RecordType>,
+  }, // 47
+
   DNSKEY {
     domain: Vec<String>,
     class: RecordClass,
@@ -91,14 +109,39 @@ pub enum Record {
     is_secure_entry_point: bool,
     is_zone_key: bool,
     protocol: u8,
-    algorithm: u8,
+    algorithm: DNSSECAlgorithm,
     public_key: Vec<u8>,
   }, // 48
+
+  NSEC3 {
+    domain: Vec<String>,
+    class: RecordClass,
+    ttl: u32,
+    hash_algorithm: u8,
+    opt_out: bool,
+    iterations: u16,
+    salt_length: u8,
+    salt: Vec<u8>,
+    hash_length: u8,
+    next_hashed_owner_name: Vec<u8>,
+    record_types: HashSet<RecordType>,
+  }, // 50
+
+  NSEC3PARAM {
+    domain: Vec<String>,
+    class: RecordClass,
+    ttl: u32,
+    hash_algorithm: u8,
+    flags: u8,
+    iterations: u16,
+    salt_length: u8,
+    salt: Vec<u8>,
+  }, // 51
 }
 
 impl Record {
   pub(crate) fn parse(buff: &mut Buffer) -> Result<Self, DrasilDNSError> {
-    let (_, domain) = buff.read_labels()?;
+    let (_, domain) = buff.read_labels(true)?;
     let record_type = RecordType::from(buff.read_u16()?);
     let class = RecordClass::from(buff.read_u16()?);
     let ttl = buff.read_u32()?;
@@ -150,18 +193,18 @@ impl Record {
       },
 
       RecordType::NS => {
-        let (_, host) = buff.read_labels()?;
+        let (_, host) = buff.read_labels(true)?;
         Self::NS { domain, host, ttl, class }
       },
 
       RecordType::CNAME => {
-        let (_, host) = buff.read_labels()?;
+        let (_, host) = buff.read_labels(true)?;
         Self::NS { domain, host, ttl, class }
       },
 
       RecordType::MX => {
         let priority = buff.read_u16()?;
-        let (_, host) = buff.read_labels()?;
+        let (_, host) = buff.read_labels(true)?;
         Self::MX { domain, priority, host, ttl, class }
       },
 
@@ -170,16 +213,25 @@ impl Record {
         Self::AAAA { domain, class, ttl, addr }
       },
 
+      RecordType::DS => {
+        let key_tag = buff.read_u16()?;
+        let algorithm = buff.read_u8()?.into();
+        let digest_type = buff.read_u8()?.into();
+        let digest = buff.read_bytes(len as usize - 4)?.to_vec();
+
+        Self::DS { domain, class, ttl, key_tag, algorithm, digest_type, digest }
+      },
+
       RecordType::RRSIG => {
         let type_covered = buff.read_u16()?;
-        let algorithm = buff.read_u8()?;
+        let algorithm = buff.read_u8()?.into();
         let labels = buff.read_u8()?;
         let original_ttl = buff.read_u32()?;
         let signature_expiration = buff.read_u32()?;
         let signature_inception = buff.read_u32()?;
         let key_tag = buff.read_u16()?;
 
-        let (signer_name_len, signer_name) = buff.read_labels()?;
+        let (signer_name_len, signer_name) = buff.read_labels(false)?;
 
         let signature_length = len as usize - (18 + signer_name_len);
         let signature = buff.read_bytes(signature_length)?.to_vec();
@@ -200,10 +252,19 @@ impl Record {
         }
       },
 
+      RecordType::NSEC => {
+        let (ndn_len, next_domain_name) = buff.read_labels(false)?;
+
+        let type_bitmaps = buff.read_bytes(len as usize - ndn_len)?;
+        let record_types = RecordType::parse_type_bitmaps(type_bitmaps.into())?;
+
+        Self::NSEC { domain, class, ttl, next_domain_name, record_types }
+      },
+
       RecordType::DNSKEY => {
         let flags = buff.read_u16()?;
         let protocol = buff.read_u8()?;
-        let algorithm = buff.read_u8()?;
+        let algorithm = buff.read_u8()?.into();
 
         let is_zone_key = (flags >> 7) & 0b1 == 1;
         let is_secure_entry_point = (flags >> 15) & 0b1 == 1;
@@ -212,10 +273,42 @@ impl Record {
 
         Self::DNSKEY { domain, class, ttl, is_secure_entry_point, is_zone_key, public_key, protocol, algorithm }
       },
+
+      RecordType::NSEC3 => {
+        let hash_algorithm = buff.read_u8()?;
+
+        let flags = buff.read_u8()?;
+        let opt_out = (flags >> 7) == 1;
+
+        let iterations = buff.read_u16()?;
+        let salt_length = buff.read_u8()?;
+        let salt = buff.read_bytes(salt_length as usize)?.to_vec();
+        let hash_length = buff.read_u8()?;
+        let next_hashed_owner_name = buff.read_bytes(hash_length as usize)?.to_vec();
+
+        let type_bitmaps_length = len as usize - 6 - (salt_length + hash_length) as usize;
+        let type_bitmaps = buff.read_bytes(type_bitmaps_length)?;
+        let record_types = RecordType::parse_type_bitmaps(type_bitmaps.into())?;
+
+        Self::NSEC3 { domain, class, ttl, hash_algorithm, opt_out, iterations, salt_length, salt, hash_length, next_hashed_owner_name, record_types }
+      },
+
+      RecordType::NSEC3PARAM => {
+        let hash_algorithm = buff.read_u8()?;
+        let flags = buff.read_u8()?;
+        let iterations = buff.read_u16()?;
+        let salt_length = buff.read_u8()?;
+        let salt = buff.read_bytes(salt_length as usize)?.to_vec();
+
+        Self::NSEC3PARAM { domain, class, ttl, hash_algorithm, flags, iterations, salt_length, salt }
+      },
     })
   }
 
   pub(crate) fn write_bytes(&self, buff: &mut Buffer) -> Result<(), DrasilDNSError> {
+    let mut b = Buffer::with_capacity(0);
+    b.set_expandable(true);
+
     match self {
       Record::Unknown {
         domain,
@@ -225,17 +318,12 @@ impl Record {
         class,
         data,
       } => {
-        let mut b = Buffer::with_capacity(0);
-        b.set_expandable(true);
-
         b.write_labels(domain)?;
         b.write_u16(*record_type)?;
         b.write_u16((*class).into())?;
         b.write_u32(*ttl)?;
         b.write_u32(*len)?;
         b.write_bytes(&data)?;
-
-        buff.write_buffer(&b)?;
       },
 
       Record::OPT {
@@ -245,9 +333,6 @@ impl Record {
         dnssec_ok,
         options,
       } => {
-        let mut b = Buffer::with_capacity(0);
-        b.set_expandable(true);
-
         b.write_u8(0)?; // set domain to empty (0)
         b.write_u16(RecordType::OPT.into())?;
         b.write_u16(*udp_payload_size)?;
@@ -264,8 +349,6 @@ impl Record {
 
         let len = (b.pos() - (pos + 2)) as u16;
         b.set_bytes(pos, &len.to_be_bytes())?;
-
-        buff.write_buffer(&b)?;
       },
 
       Record::A {
@@ -274,17 +357,12 @@ impl Record {
         ttl,
         class,
       } => {
-        let mut b = Buffer::with_capacity(0);
-        b.set_expandable(true);
-
         b.write_labels(domain)?;
         b.write_u16(RecordType::A.into())?;
         b.write_u16((*class).into())?;
         b.write_u32(*ttl)?;
         b.write_u32(4)?;
         b.write_u32(addr.to_bits())?;
-
-        buff.write_buffer(&b)?;
       },
 
       Record::NS {
@@ -293,9 +371,6 @@ impl Record {
         ttl,
         class,
       } => {
-        let mut b = Buffer::with_capacity(0);
-        b.set_expandable(true);
-
         b.write_labels(domain)?;
         b.write_u16(RecordType::NS.into())?;
         b.write_u16((*class).into())?;
@@ -306,8 +381,6 @@ impl Record {
 
         let len = b.write_labels(host)? as u32;
         b.set_bytes(pos, &len.to_be_bytes())?;
-
-        buff.write_buffer(&b)?;
       },
 
       Record::CNAME {
@@ -316,9 +389,6 @@ impl Record {
         ttl,
         class,
       } => {
-        let mut b = Buffer::with_capacity(0);
-        b.set_expandable(true);
-
         b.write_labels(domain)?;
         b.write_u16(RecordType::CNAME.into())?;
         b.write_u16((*class).into())?;
@@ -329,8 +399,6 @@ impl Record {
 
         let len = b.write_labels(host)? as u32;
         b.set_bytes(pos, &len.to_be_bytes())?;
-
-        buff.write_buffer(&b)?;
       },
 
       Record::MX {
@@ -340,9 +408,6 @@ impl Record {
         ttl,
         class,
       } => {
-        let mut b = Buffer::with_capacity(0);
-        b.set_expandable(true);
-
         b.write_labels(domain)?;
         b.write_u16(RecordType::MX.into())?;
         b.write_u16((*class).into())?;
@@ -355,8 +420,6 @@ impl Record {
         let len = b.write_labels(host)? as u32;
 
         b.set_bytes(pos, &(len + 2).to_be_bytes())?;
-
-        buff.write_buffer(&b)?;
       },
 
       Record::AAAA {
@@ -365,17 +428,32 @@ impl Record {
         ttl,
         class,
       } => {
-        let mut b = Buffer::with_capacity(0);
-        b.set_expandable(true);
-
         b.write_labels(domain)?;
         b.write_u16(RecordType::A.into())?;
         b.write_u16((*class).into())?;
         b.write_u32(*ttl)?;
         b.write_u32(16)?;
         b.write_u128(addr.to_bits())?;
+      },
 
-        buff.write_buffer(&b)?;
+      Record::DS {
+        domain,
+        class,
+        ttl,
+        key_tag,
+        algorithm,
+        digest_type,
+        digest,
+      } => {
+        b.write_labels(domain)?;
+        b.write_u16(RecordType::DS.into())?;
+        b.write_u16((*class).into())?;
+        b.write_u32(*ttl)?;
+        b.write_u32(4 + digest.len() as u32)?;
+        b.write_u16(*key_tag)?;
+        b.write_u8((*algorithm).into())?;
+        b.write_u8((*digest_type).into())?;
+        b.write_bytes(digest)?;
       },
 
       Record::RRSIG {
@@ -392,9 +470,6 @@ impl Record {
         signer_name,
         signature,
       } => {
-        let mut b = Buffer::with_capacity(0);
-        b.set_expandable(true);
-
         b.write_labels(domain)?;
         b.write_u16(RecordType::RRSIG.into())?;
         b.write_u16((*class).into())?;
@@ -404,7 +479,7 @@ impl Record {
         b.write_u32(0)?;
 
         b.write_u16(*type_covered)?;
-        b.write_u8(*algorithm)?;
+        b.write_u8((*algorithm).into())?;
         b.write_u8(*labels)?;
         b.write_u32(*original_ttl)?;
         b.write_u32(*signature_expiration)?;
@@ -415,8 +490,29 @@ impl Record {
 
         let len = b.pos() - (pos + 4);
         b.set_bytes(pos, &len.to_be_bytes())?;
+      },
 
-        buff.write_buffer(&b)?;
+      Record::NSEC {
+        domain,
+        class,
+        ttl,
+        next_domain_name,
+        record_types,
+      } => {
+        let type_bitmaps = RecordType::into_type_bitmaps(record_types)?;
+
+        b.write_labels(domain)?;
+        b.write_u16(RecordType::NSEC.into())?;
+        b.write_u16((*class).into())?;
+        b.write_u32(*ttl)?;
+
+        let pos = b.pos();
+        b.write_u32(0)?;
+
+        b.write_labels(next_domain_name)?;
+        b.write_buffer(&type_bitmaps)?;
+
+        b.set_bytes(pos, &(pos + 4).to_be_bytes())?;
       },
 
       Record::DNSKEY {
@@ -437,9 +533,6 @@ impl Record {
           flags |= 0b1 << 15;
         }
 
-        let mut b = Buffer::with_capacity(0);
-        b.set_expandable(true);
-
         b.write_labels(domain)?;
         b.write_u16(RecordType::DNSKEY.into())?;
         b.write_u16((*class).into())?;
@@ -447,13 +540,72 @@ impl Record {
         b.write_u32(4 + public_key.len() as u32)?;
         b.write_u16(flags)?;
         b.write_u8(*protocol)?;
-        b.write_u8(*algorithm)?;
+        b.write_u8((*algorithm).into())?;
         b.write_bytes(public_key)?;
+      },
 
-        buff.write_buffer(&b)?;
+      Self::NSEC3 {
+        domain,
+        class,
+        ttl,
+        hash_algorithm,
+        opt_out,
+        iterations,
+        salt_length,
+        salt,
+        hash_length,
+        next_hashed_owner_name,
+        record_types,
+      } => {
+        let type_bitmaps = RecordType::into_type_bitmaps(record_types)?;
+
+        b.write_labels(domain)?;
+        b.write_u16(RecordType::NSEC3.into())?;
+        b.write_u16((*class).into())?;
+        b.write_u32(*ttl)?;
+
+        let pos = b.pos();
+        b.write_u32(0)?;
+
+        b.write_u8(*hash_algorithm)?;
+        b.write_u8(if *opt_out { 0b1000_0000 } else { 0 })?;
+        b.write_u16(*iterations)?;
+        b.write_u8(*salt_length)?;
+        b.write_bytes(salt)?;
+        b.write_u8(*hash_length)?;
+        b.write_bytes(&next_hashed_owner_name)?;
+        b.write_buffer(&type_bitmaps)?;
+
+        b.set_bytes(pos, &(pos + 4).to_be_bytes())?;
+      },
+
+      Self::NSEC3PARAM {
+        domain,
+        class,
+        ttl,
+        hash_algorithm,
+        flags,
+        iterations,
+        salt_length,
+        salt,
+      } => {
+        if *flags == 0 {
+          return Ok(()); // flag should be equal to 0 else ignore this record
+        }
+
+        b.write_labels(domain)?;
+        b.write_u16(RecordType::NSEC3PARAM.into())?;
+        b.write_u16((*class).into())?;
+        b.write_u32(*ttl)?;
+        b.write_u8(*hash_algorithm)?;
+        b.write_u8(*flags)?;
+        b.write_u16(*iterations)?;
+        b.write_u8(*salt_length)?;
+        b.write_bytes(salt)?;
       },
     }
 
+    buff.write_buffer(&b)?;
     Ok(())
   }
 }

@@ -1,7 +1,5 @@
 
 pub mod config;
-pub mod admin;
-pub mod server;
 
 // ===== Imports =====
 #[macro_use] extern crate log;
@@ -11,6 +9,7 @@ pub mod server;
 use anyhow::Result;
 use clap::Parser;
 use merge::Merge;
+use tokio::net::UdpSocket;
 // ===================
 
 #[tokio::main]
@@ -22,11 +21,16 @@ async fn main() -> Result<()> {
   cfg.merge(cfg_file);                  // Merge config file
   cfg.merge(config::Config::default()); // Merge default values
 
-  let _ = tokio::join!(
-    admin::run_admin(),
-    server::udp::run_udp(),
-    server::tcp::run_tcp(),
-  );
+  let host = cfg.host.expect("No host address provided");
+  let port = cfg.port.expect("No port provided");
 
-  Ok(())
+  info!("Listening at {}:{}", host, port);
+
+  let lis = UdpSocket::bind((host, port)).await?;
+  loop {
+    let mut buff = [0; 512];
+    let (_len, _from) = lis.recv_from(&mut buff).await?;
+    let packet = drasil_dns::packet::Packet::parse(&buff)?;
+    println!("{:#?}", packet);
+  }
 }

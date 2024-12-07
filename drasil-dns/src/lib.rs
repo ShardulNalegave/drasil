@@ -1,6 +1,6 @@
 
 pub(crate) mod buffer;
-pub mod common;
+pub mod types;
 
 /// Provides error type for the crate
 pub mod error;

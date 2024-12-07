@@ -1,6 +1,6 @@
 
 // ===== Imports =====
-use crate::{buffer::Buffer, common::{RecordClass, RecordType}, error::DrasilDNSError};
+use crate::{buffer::Buffer, types::{RecordClass, RecordType}, error::DrasilDNSError};
 // ===================
 
 /// # Question
@@ -14,7 +14,7 @@ pub struct Question {
 
 impl Question {
   pub(crate) fn parse(buff: &mut Buffer) -> Result<Self, DrasilDNSError> {
-    let (_, name) = buff.read_labels()?;
+    let (_, name) = buff.read_labels(true)?;
     let record_type = RecordType::from(buff.read_u16()?);
     let record_class = RecordClass::from(buff.read_u16()?);
 
