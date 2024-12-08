@@ -94,34 +94,37 @@ impl From<u16> for RecordType {
 }
 
 impl RecordType {
+  pub fn is_unknown(&self) -> bool {
+    if let Self::Unknown(_) = self {
+      return true;
+    }
+    return false;
+  }
+
   pub(crate) fn parse_type_bitmaps(mut buff: Buffer) -> Result<HashSet<RecordType>, DrasilDNSError> {
     let mut recs = HashSet::new();
 
-    while buff.is_eof() {
+    while !buff.is_eof() {
       let window = buff.read_u8()?;
       let len = buff.read_u8()?;
       let bitmap = buff.read_bytes(len as usize)?;
+      let window_offset = window as u16 * 256;
 
       for (byte_offset, &byte) in bitmap.iter().enumerate() {
         if byte == 0 {
           continue;
         }
 
-        let offset = (window as u16 * 256) + (byte_offset as u16 * 8);
+        let byte_offset = byte_offset as u16 * 8;
+        let mut pos = 1;
 
-        let mut bits = byte;
-        let mut pos = 0;
-
-        while bits != 0 {
-          if bits & 0x80 != 0 {
-            let rec = RecordType::from(offset + pos);
-            match rec {
-              Self::Unknown(_) => {},
-              rec => { recs.insert(rec); },
+        while pos <= 8 {
+          if (byte >> (8 - pos)) & 0b1 == 0b1 {
+            let rec: RecordType = RecordType::from(window_offset + byte_offset + pos);
+            if !rec.is_unknown() {
+              recs.insert(rec);
             }
           }
-
-          bits <<= 1;
           pos += 1;
         }
       }
@@ -138,8 +141,8 @@ impl RecordType {
 
     for &rec in set {
       let rec_val: u16 = rec.into();
-      let window = (rec_val / 256) as usize;
-      let offset = (rec_val % 256) as usize;
+      let window = ((rec_val - 1) / 256) as usize;
+      let offset = ((rec_val - 1) % 256) as usize;
       let byte_offset = offset / 8;
       let byte_pos = offset % 8;
 
@@ -148,7 +151,7 @@ impl RecordType {
       }
 
       if windows[window].get(byte_offset).is_none() {
-        windows[window].push(0);
+        windows[window].resize(byte_offset + 1, 0);
       }
 
       windows[window][byte_offset] |= 1 << (7 - byte_pos);
@@ -163,5 +166,39 @@ impl RecordType {
     }
 
     Ok(buff)
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn record_type_set_to_type_bitmaps() {
+    let mut set = HashSet::new();
+    set.insert(RecordType::A);
+    set.insert(RecordType::CNAME);
+    set.insert(RecordType::NSEC3PARAM);
+
+    let ans: Vec<u8> = vec![
+      0, 7, 0b1000_1000, 0, 0, 0, 0, 0, 0b00100000,
+    ];
+
+    let buff = RecordType::into_type_bitmaps(&set).expect("Failed at into_type_bitmaps");
+    let buff_bytes: Vec<u8> = buff.into();
+    assert_eq!(buff_bytes, ans, "RecordType set to Type-Bitmaps conversion failed");
+  }
+
+  #[test]
+  fn type_bitmaps_to_record_type_set() {
+    let data = [
+      0, 1, 0b1000_1000,
+    ];
+
+    let buff: Buffer = data[..].into();
+    let set = RecordType::parse_type_bitmaps(buff).expect("Failed at parse_type_bitmaps");
+
+    assert!(set.contains(&RecordType::A), "set doesn't contain type A which is set");
+    assert!(set.contains(&RecordType::CNAME), "set doesn't contain type CNAME which is set");
   }
 }

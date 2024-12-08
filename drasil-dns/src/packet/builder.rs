@@ -7,17 +7,6 @@ use crate::{
 
 /// # Packet Builder
 /// Utility struct to construct DNS packets.
-/// Example:-
-/// ```rust
-/// let packet = PacketBuilder::new(5)
-///   .with_request_kind(RequestKind::Query)
-///   .recursion_desired()
-///   .add_question(Question {
-///     name: vec!["google".into(), "com".into()],
-///     record_type: RecordType::A,
-///     record_class: RecordClass::IN,
-///   }).build();
-/// ```
 pub struct PacketBuilder {
   id: u16,
   request_kind: RequestKind,

@@ -29,4 +29,9 @@ pub use crate::{
   },
   question::Question,
   record::Record,
+  types::{
+    RecordClass,
+    RecordType,
+    dnssec,
+  },
 };

@@ -8,26 +8,25 @@ use crate::error::DrasilDNSError;
 /// All operations are atomic for both reads and writes.
 pub(crate) struct Buffer {
   pos: usize,
-  capacity: usize,
   data: Vec<u8>,
   expandable: bool,
 }
 
 impl Default for Buffer {
   fn default() -> Self {
-    Self { pos: 0, capacity: 512, data: vec![0; 512], expandable: false } // DNS packet size is 512 bytes acc. to original spec
+    Self { pos: 0, data: vec![0; 512], expandable: false } // DNS packet size is 512 bytes acc. to original spec
   }
 }
 
 impl From<&[u8]> for Buffer {
   fn from(data: &[u8]) -> Self {
-    Self { pos: 0, capacity: data.len(), data: data.to_vec(), expandable: false }
+    Self { pos: 0, data: data.to_vec(), expandable: false }
   }
 }
 
 impl From<Vec<u8>> for Buffer {
   fn from(data: Vec<u8>) -> Self {
-    Self { pos: 0, capacity: data.len(), data, expandable: false }
+    Self { pos: 0, data, expandable: false }
   }
 }
 
@@ -37,10 +36,11 @@ impl Into<Vec<u8>> for Buffer {
   }
 }
 
+#[allow(dead_code)]
 impl Buffer {
   /// Creates a new `Buffer` with given capacity
   pub fn with_capacity(capacity: usize) -> Self {
-    Self { pos: 0, capacity, data: vec![0; capacity], expandable: false }
+    Self { pos: 0, data: vec![0; capacity], expandable: false }
   }
 
   /// Used to set the expandable nature of the `Buffer`
@@ -49,23 +49,18 @@ impl Buffer {
   }
 
   /// Tells whether or not `Buffer` is expandable
-  pub fn expandable(&self) -> bool {
+  pub fn is_expandable(&self) -> bool {
     self.expandable
   }
 
   /// Tells whether `Buffer` is at EOF position
   pub fn is_eof(&self) -> bool {
-    self.pos >= self.capacity
+    self.pos >= self.data.len() && !self.expandable
   }
 
   /// Returns current position of the buffer
   pub fn pos(&self) -> usize {
     self.pos
-  }
-
-  /// Returns the capacity of `Buffer`
-  pub fn capacity(&self) -> usize {
-    self.capacity
   }
 
   /// Sets current position of the buffer
@@ -76,26 +71,16 @@ impl Buffer {
   /// Sets given slice data in the buffer from the provided position.
   /// This is an atomic operation, in case the write fails at any point the position and half-written data will be reset.
   pub fn set_bytes(&mut self, at: usize, bytes: &[u8]) -> Result<(), DrasilDNSError> {
-    if (at + bytes.len()) > self.capacity {
-      if self.expandable {
-        let extra = self.capacity - (at + bytes.len());
-        self.capacity = extra;
-        self.data.append(&mut vec![0; extra]);
-      } else {
+    if (at + bytes.len()) > self.data.len() {
+      if !self.expandable {
         return Err(DrasilDNSError::EOF);
       }
+
+      self.data.resize(at + bytes.len(), 0);
     }
 
-    for b in bytes {
-      if let Err(err) = self.write_u8(*b) {
-        let i = self.pos - at;
-        self.set_bytes(at, &vec![0; i])?;
-        self.pos -= i;
-
-        return Err(DrasilDNSError::WriteFailed { error: Box::new(err) });
-      }
-    }
-
+    self.data[at..(at + bytes.len())].copy_from_slice(bytes);
+    self.pos = at + bytes.len();
     Ok(())
   }
 
@@ -103,17 +88,6 @@ impl Buffer {
   pub fn set_buffer(&mut self, at: usize, buff: &Buffer) -> Result<(), DrasilDNSError> {
     self.set_bytes(at, &buff.data)?;
     Ok(())
-  }
-
-  /// Reads `len` number of bytes from the current position.
-  pub fn read_bytes(&mut self, len: usize) -> Result<&[u8], DrasilDNSError> {
-    if (self.pos + len) > self.capacity {
-      return Err(DrasilDNSError::EOF);
-    }
-
-    let bytes = &self.data[self.pos..(self.pos+len)];
-    self.pos += len;
-    Ok(bytes)
   }
 
   /// Write given bytes starting from current position
@@ -128,16 +102,21 @@ impl Buffer {
     Ok(())
   }
 
-  /// Reads a single byte
-  pub fn read_u8(&mut self) -> Result<u8, DrasilDNSError> {
-    if self.pos > self.capacity {
+  /// Reads `len` number of bytes from the current position.
+  pub fn read_bytes(&mut self, len: usize) -> Result<&[u8], DrasilDNSError> {
+    if (self.pos + len) > self.data.len() {
       return Err(DrasilDNSError::EOF);
     }
 
-    let byte = self.data[self.pos];
-    self.pos += 1;
+    let bytes = &self.data[self.pos..(self.pos+len)];
+    self.pos += len;
+    Ok(bytes)
+  }
 
-    Ok(byte)
+  /// Reads a single byte
+  pub fn read_u8(&mut self) -> Result<u8, DrasilDNSError> {
+    let byte: [u8; 1] = self.read_bytes(1)?.try_into().unwrap(); // is safe because returned slice's length is already known
+    Ok(byte[0])
   }
 
   /// Reads a `u16`
@@ -166,18 +145,7 @@ impl Buffer {
 
   /// Writes a single byte
   pub fn write_u8(&mut self, val: u8) -> Result<(), DrasilDNSError> {
-    if self.pos > self.capacity {
-      if self.expandable {
-        self.capacity += 1;
-        self.data.push(0);
-      } else {
-        return Err(DrasilDNSError::EOF);
-      }
-    }
-
-    self.data[self.pos] = val;
-    self.pos += 1;
-
+    self.write_bytes(&[val])?;
     Ok(())
   }
 
@@ -304,5 +272,76 @@ impl Buffer {
 
     self.write_buffer(&b)?;
     Ok(self.pos - initial_pos)
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn buffer_basic_read_ops() -> Result<(), DrasilDNSError> {
+    let data = [
+      0x50, 0x12, 0x34
+    ];
+
+    let mut b: Buffer = data[..].into();
+
+    let v1 = b.read_u16().expect("Failed at read u16");
+    let v2 = b.read_u8().expect("Failed at read_u8");
+
+    b.seek(0);
+    let v3 = b.read_bytes(3)
+      .expect("Failed at read_bytes")
+      .to_vec();
+
+    match b.read_u8() {
+      Err(DrasilDNSError::EOF) => {},
+      _ => panic!("expected EOF found something else"),
+    }
+
+    assert_eq!(v1, 0x5012, "Failed at read_u16");
+    assert_eq!(v2, 0x34, "Failed at read_u8");
+    assert_eq!(v3, &data[..], "Failed at read_bytes");
+
+    Ok(())
+  }
+
+  #[test]
+  fn buffer_basic_write_ops() {
+    let mut b1 = Buffer::with_capacity(3);
+    b1.write_u16(0x5012).expect("Failed at write_u16");
+    b1.write_u8(0x34).expect("Failed at write_u8");
+
+    b1.write_u8(0x00).expect_err("Write allowed to Buffer already at max capacity");
+
+    let bytes: Vec<u8> = b1.into();
+    assert_eq!(vec![0x50, 0x12, 0x34], bytes, "Final buffer is incorrect");
+
+    let mut b2 = Buffer::with_capacity(0);
+    b2.set_expandable(true);
+
+    b2.write_u8(0x50).expect("Failed at write_u8");
+    b2.write_bytes(&[ 0x12, 0x34 ]).expect("Failed at write_bytes");
+
+    let bytes: Vec<u8> = b2.into();
+    assert_eq!(vec![0x50, 0x12, 0x34], bytes, "Final buffer is incorrect");
+  }
+
+  #[test]
+  fn buffer_label_read_write() {
+    let mut b = Buffer::with_capacity(0);
+    b.set_expandable(true);
+
+    let test_labels = vec![
+      "google".to_string(),
+      "com".to_string(),
+    ];
+
+    b.write_labels(&test_labels).expect("Failed at write_labels");
+
+    b.seek(0);
+    let (_, labels) = b.read_labels(false).expect("Failed at read_labels");
+    assert_eq!(labels, test_labels, "Labels not equal")
   }
 }
