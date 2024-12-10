@@ -8,14 +8,20 @@ use thiserror::Error;
 pub enum DrasilDNSError {
   #[error("unknown error")]
   Unknown,
-  #[error("invalid packet size (expected: 512 bytes, received: {size})")]
-  InvalidPacketSize { size: usize },
   #[error("too many jumps encountered in label sequence (max 5 allowed)")]
   TooManyJumpsInLabelSequence,
-  #[error("label size exceeds 63 characters")]
-  LabelTooLarge,
+  #[error("label size exceeds 63 characters (size: {size})")]
+  LabelTooLarge { size: u8 },
   #[error("reached the end while parsing the packet, please ensure packet data is correct")]
   EOF,
-  #[error("there was a error during write, resetting current pointer: {error:?}")]
-  WriteFailed { error: Box<DrasilDNSError> },
+  #[error("invalid source netmask provided (family: {family}, max: {max}, provided: {provided})")]
+  InvalidSourceNetmask { family: u16, max: u8, provided: u8 },
+  #[error("invalid scope netmask provided (family: {family}, max: {max}, provided: {provided})")]
+  InvalidScopeNetmask { family: u16, max: u8, provided: u8 },
+  #[error("unknown network family (value: {family})")]
+  InvalidNetworkFamily { family: u16 },
+  #[error("invalid EDNS(0) option length (option-type: {option_type}, size: {size})")]
+  InvalidEDNSOptionLength { option_type: u16, size: u16 },
+  #[error("invalid data: {msg}")]
+  InvalidData { msg: String },
 }

@@ -3,6 +3,7 @@
 use crate::{buffer::Buffer, error::DrasilDNSError};
 // ===================
 
+/// Enum for EDNS(0) option types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u16)]
 pub enum EDNSOptionType {
@@ -52,6 +53,9 @@ impl From<u16> for EDNSOptionType {
   }
 }
 
+/// # EDNS(0) Option
+/// Enum for representing all EDNS(0) options.
+/// Options are the {attribute, value} pairs stored in the RDATA section of OPT RR.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EDNSOption {
   Unknown {
@@ -115,122 +119,152 @@ pub enum EDNSOption {
 
 impl EDNSOption {
   pub(crate) fn parse(buff: &mut Buffer) -> Result<EDNSOption, DrasilDNSError> {
-    let code = buff.read_u16()?;
-    let len = buff.read_u16()?;
+    buff.read_transaction(|buff| {
+      let code = buff.read_u16()?;
+      let len = buff.read_u16()?;
 
-    Ok(match code {
-      3 => {
-        let data = buff.read_bytes(len as usize - 2)?;
-        Self::NSID { data: String::from_utf8_lossy(&data).to_string() }
-      },
+      Ok(match code {
+        3 => {
+          let data = buff.read_bytes(len as usize - 2)?;
+          Self::NSID { data: String::from_utf8_lossy(&data).to_string() }
+        },
 
-      8 => {
-        let family = buff.read_u16()?;
-        let source_netmask = buff.read_u8()?;
-        let scope_netmask = buff.read_u8()?;
-        let mut addr = 0_u128;
+        8 => {
+          let family = buff.read_u16()?;
+          let source_netmask = buff.read_u8()?;
+          let scope_netmask = buff.read_u8()?;
+          let mut addr = 0_u128;
 
-        if family == 1 { // ipv4
-          assert!(source_netmask <= 32, "invalid source netmask in OPT");
-          assert!(scope_netmask <= 32, "invalid scope netmask in OPT");
-        } else if family == 2 { // ipv6
-          assert!(source_netmask <= 128, "invalid source netmask in OPT");
-          assert!(scope_netmask <= 128, "invalid scope netmask in OPT");
-        }
+          if family == 1 { // ipv4
+            if source_netmask > 32 {
+              return Err(DrasilDNSError::InvalidSourceNetmask { family, max: 32, provided: source_netmask })
+            }
+            if scope_netmask > 32 {
+              return Err(DrasilDNSError::InvalidScopeNetmask { family, max: 32, provided: source_netmask })
+            }
+          } else if family == 2 { // ipv6
+            if source_netmask > 128 {
+              return Err(DrasilDNSError::InvalidSourceNetmask { family, max: 128, provided: source_netmask })
+            }
+            if scope_netmask > 128 {
+              return Err(DrasilDNSError::InvalidScopeNetmask { family, max: 128, provided: source_netmask })
+            }
+          } else {
+            return Err(DrasilDNSError::InvalidNetworkFamily { family });
+          }
 
-        if source_netmask <= 8 {
-          addr = buff.read_u8()? as u128;
-        } else if source_netmask <= 16 {
-          addr = buff.read_u16()? as u128;
-        } else if source_netmask <= 32 {
-          addr = buff.read_u32()? as u128;
-        } else if source_netmask <= 64 {
-          addr = buff.read_u64()? as u128;
-        } else if source_netmask <= 128 {
-          addr = buff.read_u128()? as u128;
-        }
+          if source_netmask <= 8 {
+            addr = buff.read_u8()? as u128;
+          } else if source_netmask <= 16 {
+            addr = buff.read_u16()? as u128;
+          } else if source_netmask <= 32 {
+            addr = buff.read_u32()? as u128;
+          } else if source_netmask <= 64 {
+            addr = buff.read_u64()? as u128;
+          } else if source_netmask <= 128 {
+            addr = buff.read_u128()? as u128;
+          }
 
-        Self::ClientSubnet { family, source_netmask, scope_netmask, addr }
-      },
+          Self::ClientSubnet { family, source_netmask, scope_netmask, addr }
+        },
 
-      10 => {
-        assert!(len == 8 || len == 16, "Cookie option length should be 8 or 16");
+        10 => {
+          if len != 8 && len != 16 {
+            return Err(DrasilDNSError::InvalidEDNSOptionLength { option_type: 10, size: len });
+          }
 
-        let client = buff.read_u64()?;
-        let mut server = None;
-        if len == 16 {
-          server = Some(buff.read_u64()?);
-        }
+          let client = buff.read_u64()?;
+          let mut server = None;
+          if len == 16 {
+            server = Some(buff.read_u64()?);
+          }
 
-        Self::Cookie { client, server }
-      },
+          Self::Cookie { client, server }
+        },
 
-      11 => {
-        assert!(len == 2, "KeepAlive option length should be 2");
+        11 => {
+          if len != 2 {
+            return Err(DrasilDNSError::InvalidEDNSOptionLength { option_type: 11, size: len });
+          }
 
-        let timeout = buff.read_u16()?;
-        Self::KeepAlive { timeout }
-      },
+          let timeout = buff.read_u16()?;
+          Self::KeepAlive { timeout }
+        },
 
-      12 => {
-        buff.seek(buff.pos() + (len as usize));
-        Self::Padding { len }
-      },
+        12 => {
+          buff.seek(buff.pos() + (len as usize));
+          Self::Padding { len }
+        },
 
-      13 => {
-        assert!(len == 4, "ChainQuery option length should be 4");
+        13 => {
+          if len != 4 {
+            return Err(DrasilDNSError::InvalidEDNSOptionLength { option_type: 13, size: len });
+          }
 
-        let flags = buff.read_u16()?;
-        let qname_min_length = buff.read_u16()?;
+          let flags = buff.read_u16()?;
+          let qname_min_length = buff.read_u16()?;
 
-        Self::ChainQuery { flags, qname_min_length }
-      },
+          Self::ChainQuery { flags, qname_min_length }
+        },
 
-      14 => {
-        assert!(len % 2 == 0, "KeyTag option length should be a multiple of 2");
+        14 => {
+          if len % 2 != 0 {
+            return Err(DrasilDNSError::InvalidEDNSOptionLength { option_type: 14, size: len });
+          }
 
-        let mut tags = vec![];
-        for _ in 0..(len % 2) {
-          tags.push(buff.read_u16()?);
-        }
+          let mut tags = vec![];
+          for _ in 0..(len % 2) {
+            tags.push(buff.read_u16()?);
+          }
 
-        Self::KeyTag { tags }
-      },
+          Self::KeyTag { tags }
+        },
 
-      15 => {
-        let info_code = buff.read_u16()?;
-        let extra_text = buff.read_bytes(len as usize - 2)?;
+        15 => {
+          let info_code = buff.read_u16()?;
+          let extra_text = buff.read_bytes(len as usize - 2)?;
 
-        Self::EDE { info_code, extra_text: String::from_utf8_lossy(extra_text).to_string() }
-      },
+          Self::EDE { info_code, extra_text: String::from_utf8_lossy(extra_text).to_string() }
+        },
 
-      16 => {
-        let family = buff.read_u16()?;
-        let source_netmask = buff.read_u8()?;
-        let scope_netmask = buff.read_u8()?;
+        16 => {
+          let family = buff.read_u16()?;
+          let source_netmask = buff.read_u8()?;
+          let scope_netmask = buff.read_u8()?;
 
-        if family == 1 { // ipv4
-          assert!(source_netmask <= 32, "invalid source netmask in OPT");
-          assert!(scope_netmask <= 32, "invalid scope netmask in OPT");
+          if family == 1 { // ipv4
+            if source_netmask > 32 {
+              return Err(DrasilDNSError::InvalidSourceNetmask { family, max: 32, provided: source_netmask })
+            }
 
-          let addr = buff.read_u32()?;
-          Self::EcsIPv4 { source_netmask, scope_netmask, addr }
+            if scope_netmask > 32 {
+              return Err(DrasilDNSError::InvalidScopeNetmask { family, max: 32, provided: source_netmask })
+            }
 
-        } else if family == 2 { // ipv6
-          assert!(source_netmask <= 128, "invalid source netmask in OPT");
-          assert!(scope_netmask <= 128, "invalid scope netmask in OPT");
+            let addr = buff.read_u32()?;
+            Self::EcsIPv4 { source_netmask, scope_netmask, addr }
 
-          let addr = buff.read_u128()?;
-          Self::EcsIPv6 { source_netmask, scope_netmask, addr }
-        } else {
-          unreachable!()
-        }
-      },
-      
-      code => {
-        let data = buff.read_bytes(len as usize)?.to_vec();
-        Self::Unknown { code, len, data }
-      },
+          } else if family == 2 { // ipv6
+            if source_netmask > 128 {
+              return Err(DrasilDNSError::InvalidSourceNetmask { family, max: 128, provided: source_netmask })
+            }
+
+            if scope_netmask > 128 {
+              return Err(DrasilDNSError::InvalidScopeNetmask { family, max: 128, provided: source_netmask })
+            }
+
+            let addr = buff.read_u128()?;
+            Self::EcsIPv6 { source_netmask, scope_netmask, addr }
+          } else {
+            return Err(DrasilDNSError::InvalidNetworkFamily { family });
+          }
+        },
+        
+        code => {
+          let data = buff.read_bytes(len as usize)?.to_vec();
+          Self::Unknown { code, len, data }
+        },
+      })
     })
   }
 
@@ -259,19 +293,35 @@ impl EDNSOption {
       },
 
       EDNSOption::ClientSubnet { family, source_netmask, scope_netmask, addr } => {
-        let len = 4 + {
-          if *source_netmask <= 8 { 1 }
-          else if *source_netmask <= 16 { 2 }
-          else if *source_netmask <= 32 { 4 }
-          else if *source_netmask <= 64 { 8 }
-          else if *source_netmask <= 128 { 16 }
-          else { unreachable!() }
-        };
+        if !(1..=2).contains(family) {
+          return Err(DrasilDNSError::InvalidNetworkFamily { family: *family });
+        }
 
-        let mut b = Buffer::with_capacity(4 + len as usize);
+        if *family == 1 { // ipv4
+          if *source_netmask > 32 {
+            return Err(DrasilDNSError::InvalidSourceNetmask { family: *family, max: 32, provided: *source_netmask })
+          }
+          if *scope_netmask > 32 {
+            return Err(DrasilDNSError::InvalidScopeNetmask { family: *family, max: 32, provided: *source_netmask })
+          }
+        } else if *family == 2 { // ipv6
+          if *source_netmask > 128 {
+            return Err(DrasilDNSError::InvalidSourceNetmask { family: *family, max: 128, provided: *source_netmask })
+          }
+          if *scope_netmask > 128 {
+            return Err(DrasilDNSError::InvalidScopeNetmask { family: *family, max: 128, provided: *source_netmask })
+          }
+        } else {
+          return Err(DrasilDNSError::InvalidNetworkFamily { family: *family });
+        }
+
+        let mut b = Buffer::with_capacity(0);
+        b.set_expandable(true);
 
         b.write_u16(EDNSOptionType::ClientSubnet.into())?;
-        b.write_u16(len)?;
+        
+        let pos = b.pos();
+        b.write_u16(0)?;
 
         b.write_u16(*family)?;
         b.write_u8(*source_netmask)?;
@@ -289,6 +339,8 @@ impl EDNSOption {
           b.write_u128(*addr)?;
         }
 
+        let len = (b.pos() - (pos + 2)) as u16;
+        b.set_bytes(pos, &len.to_be_bytes())?;
         buff.write_buffer(&b)?;
       },
 
@@ -389,5 +441,36 @@ impl EDNSOption {
     }
 
     Ok(())
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn edns_rw() {
+    let mut b = Buffer::with_capacity(0);
+    b.set_expandable(true);
+
+    let options: Vec<EDNSOption> = vec![
+      EDNSOption::Cookie { client: 100, server: None },
+      EDNSOption::Cookie { client: 100, server: Some(150) },
+
+      EDNSOption::ClientSubnet { family: 1, source_netmask: 24, scope_netmask: 0, addr: 0x10101010 },
+    ];
+
+    for option in &options {
+      option.write_bytes(&mut b).expect("Failed to write EDNS option");
+    }
+
+    b.seek(0);
+
+    let mut options_after_read = vec![];
+    for _ in 0..options.len() {
+      options_after_read.push(EDNSOption::parse(&mut b).expect("Failed to read EDNS option"));
+    }
+
+    assert_eq!(options, options_after_read, "EDNS Options unequal after write+read");
   }
 }

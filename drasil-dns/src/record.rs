@@ -140,168 +140,174 @@ pub enum Record {
 }
 
 impl Record {
-  pub(crate) fn parse(buff: &mut Buffer) -> Result<Self, DrasilDNSError> {
-    let (_, domain) = buff.read_labels(true)?;
-    let record_type = RecordType::from(buff.read_u16()?);
-    let class = RecordClass::from(buff.read_u16()?);
-    let ttl = buff.read_u32()?;
-    let len = buff.read_u32()?;
+  pub(crate) fn parse(buff: &mut Buffer) -> Result<Option<Self>, DrasilDNSError> {
+    buff.read_transaction(|buff| {
+      let (_, domain) = buff.read_labels(true)?;
+      let record_type = RecordType::from(buff.read_u16()?);
+      let class = RecordClass::from(buff.read_u16()?);
+      let ttl = buff.read_u32()?;
+      let len = buff.read_u32()?;
 
-    Ok(match record_type {
-      RecordType::Unknown(v) => {
-        let data = buff.read_bytes(len as usize)?;
-        Self::Unknown {
-          domain,
-          ttl,
-          len,
-          record_type: v,
-          class,
-          data: data.to_vec(),
-        }
-      },
-
-      RecordType::OPT => {
-        buff.seek(buff.pos() - 10);
-
-        let udp_payload_size = buff.read_u16()?;
-        let extended_rcode = buff.read_u8()?;
-        let version = buff.read_u8()?;
-
-        let reserved = buff.read_u16()?;
-        let dnssec_ok: bool = (reserved & 0x8000) >> 15 == 1;
-
-        let data_length = buff.read_u16()?;
-
-        let pos = buff.pos();
-        let mut options = vec![];
-
-        loop {
-          let opt = EDNSOption::parse(buff)?;
-          options.push(opt);
-
-          if buff.pos() - pos >= (data_length as usize) {
-            break;
+      Ok(Some(match record_type {
+        RecordType::Unknown(v) => {
+          let data = buff.read_bytes(len as usize)?;
+          Self::Unknown {
+            domain,
+            ttl,
+            len,
+            record_type: v,
+            class,
+            data: data.to_vec(),
           }
+        },
+
+        RecordType::OPT => {
+          buff.seek(buff.pos() - 10);
+
+          let udp_payload_size = buff.read_u16()?;
+          let extended_rcode = buff.read_u8()?;
+          let version = buff.read_u8()?;
+
+          let reserved = buff.read_u16()?;
+          let dnssec_ok: bool = (reserved & 0x8000) >> 15 == 1;
+
+          let data_length = buff.read_u16()?;
+
+          let pos = buff.pos();
+          let mut options = vec![];
+
+          loop {
+            let opt = EDNSOption::parse(buff)?;
+            options.push(opt);
+
+            if buff.pos() - pos >= (data_length as usize) {
+              break;
+            }
+          }
+
+          Self::OPT { udp_payload_size, extended_rcode, version, dnssec_ok, options }
         }
 
-        Self::OPT { udp_payload_size, extended_rcode, version, dnssec_ok, options }
-      }
+        RecordType::A => {
+          let addr = Ipv4Addr::from_bits(buff.read_u32()?);
+          Self::A { domain, class, ttl, addr }
+        },
 
-      RecordType::A => {
-        let addr = Ipv4Addr::from_bits(buff.read_u32()?);
-        Self::A { domain, class, ttl, addr }
-      },
+        RecordType::NS => {
+          let (_, host) = buff.read_labels(true)?;
+          Self::NS { domain, host, ttl, class }
+        },
 
-      RecordType::NS => {
-        let (_, host) = buff.read_labels(true)?;
-        Self::NS { domain, host, ttl, class }
-      },
+        RecordType::CNAME => {
+          let (_, host) = buff.read_labels(true)?;
+          Self::NS { domain, host, ttl, class }
+        },
 
-      RecordType::CNAME => {
-        let (_, host) = buff.read_labels(true)?;
-        Self::NS { domain, host, ttl, class }
-      },
+        RecordType::MX => {
+          let priority = buff.read_u16()?;
+          let (_, host) = buff.read_labels(true)?;
+          Self::MX { domain, priority, host, ttl, class }
+        },
 
-      RecordType::MX => {
-        let priority = buff.read_u16()?;
-        let (_, host) = buff.read_labels(true)?;
-        Self::MX { domain, priority, host, ttl, class }
-      },
+        RecordType::AAAA => {
+          let addr = Ipv6Addr::from_bits(buff.read_u128()?);
+          Self::AAAA { domain, class, ttl, addr }
+        },
 
-      RecordType::AAAA => {
-        let addr = Ipv6Addr::from_bits(buff.read_u128()?);
-        Self::AAAA { domain, class, ttl, addr }
-      },
+        RecordType::DS => {
+          let key_tag = buff.read_u16()?;
+          let algorithm = buff.read_u8()?.into();
+          let digest_type = buff.read_u8()?.into();
+          let digest = buff.read_bytes(len as usize - 4)?.to_vec();
 
-      RecordType::DS => {
-        let key_tag = buff.read_u16()?;
-        let algorithm = buff.read_u8()?.into();
-        let digest_type = buff.read_u8()?.into();
-        let digest = buff.read_bytes(len as usize - 4)?.to_vec();
+          Self::DS { domain, class, ttl, key_tag, algorithm, digest_type, digest }
+        },
 
-        Self::DS { domain, class, ttl, key_tag, algorithm, digest_type, digest }
-      },
+        RecordType::RRSIG => {
+          let type_covered = buff.read_u16()?;
+          let algorithm = buff.read_u8()?.into();
+          let labels = buff.read_u8()?;
+          let original_ttl = buff.read_u32()?;
+          let signature_expiration = buff.read_u32()?;
+          let signature_inception = buff.read_u32()?;
+          let key_tag = buff.read_u16()?;
 
-      RecordType::RRSIG => {
-        let type_covered = buff.read_u16()?;
-        let algorithm = buff.read_u8()?.into();
-        let labels = buff.read_u8()?;
-        let original_ttl = buff.read_u32()?;
-        let signature_expiration = buff.read_u32()?;
-        let signature_inception = buff.read_u32()?;
-        let key_tag = buff.read_u16()?;
+          let (signer_name_len, signer_name) = buff.read_labels(false)?;
 
-        let (signer_name_len, signer_name) = buff.read_labels(false)?;
+          let signature_length = len as usize - (18 + signer_name_len);
+          let signature = buff.read_bytes(signature_length)?.to_vec();
 
-        let signature_length = len as usize - (18 + signer_name_len);
-        let signature = buff.read_bytes(signature_length)?.to_vec();
+          Self::RRSIG {
+            domain,
+            class,
+            ttl,
+            type_covered,
+            algorithm,
+            labels,
+            original_ttl,
+            signature_expiration,
+            signature_inception,
+            key_tag,
+            signer_name,
+            signature,
+          }
+        },
 
-        Self::RRSIG {
-          domain,
-          class,
-          ttl,
-          type_covered,
-          algorithm,
-          labels,
-          original_ttl,
-          signature_expiration,
-          signature_inception,
-          key_tag,
-          signer_name,
-          signature,
-        }
-      },
+        RecordType::NSEC => {
+          let (ndn_len, next_domain_name) = buff.read_labels(false)?;
 
-      RecordType::NSEC => {
-        let (ndn_len, next_domain_name) = buff.read_labels(false)?;
+          let type_bitmaps = buff.read_bytes(len as usize - ndn_len)?;
+          let record_types = RecordType::parse_type_bitmaps(type_bitmaps.into())?;
 
-        let type_bitmaps = buff.read_bytes(len as usize - ndn_len)?;
-        let record_types = RecordType::parse_type_bitmaps(type_bitmaps.into())?;
+          Self::NSEC { domain, class, ttl, next_domain_name, record_types }
+        },
 
-        Self::NSEC { domain, class, ttl, next_domain_name, record_types }
-      },
+        RecordType::DNSKEY => {
+          let flags = buff.read_u16()?;
+          let protocol = buff.read_u8()?;
+          let algorithm = buff.read_u8()?.into();
 
-      RecordType::DNSKEY => {
-        let flags = buff.read_u16()?;
-        let protocol = buff.read_u8()?;
-        let algorithm = buff.read_u8()?.into();
+          let is_zone_key = (flags >> 7) & 0b1 == 1;
+          let is_secure_entry_point = (flags >> 15) & 0b1 == 1;
 
-        let is_zone_key = (flags >> 7) & 0b1 == 1;
-        let is_secure_entry_point = (flags >> 15) & 0b1 == 1;
+          let public_key = buff.read_bytes(len as usize - 4)?.to_vec();
 
-        let public_key = buff.read_bytes(len as usize - 4)?.to_vec();
+          Self::DNSKEY { domain, class, ttl, is_secure_entry_point, is_zone_key, public_key, protocol, algorithm }
+        },
 
-        Self::DNSKEY { domain, class, ttl, is_secure_entry_point, is_zone_key, public_key, protocol, algorithm }
-      },
+        RecordType::NSEC3 => {
+          let hash_algorithm = buff.read_u8()?;
 
-      RecordType::NSEC3 => {
-        let hash_algorithm = buff.read_u8()?;
+          let flags = buff.read_u8()?;
+          let opt_out = (flags >> 7) == 1;
 
-        let flags = buff.read_u8()?;
-        let opt_out = (flags >> 7) == 1;
+          let iterations = buff.read_u16()?;
+          let salt_length = buff.read_u8()?;
+          let salt = buff.read_bytes(salt_length as usize)?.to_vec();
+          let hash_length = buff.read_u8()?;
+          let next_hashed_owner_name = buff.read_bytes(hash_length as usize)?.to_vec();
 
-        let iterations = buff.read_u16()?;
-        let salt_length = buff.read_u8()?;
-        let salt = buff.read_bytes(salt_length as usize)?.to_vec();
-        let hash_length = buff.read_u8()?;
-        let next_hashed_owner_name = buff.read_bytes(hash_length as usize)?.to_vec();
+          let type_bitmaps_length = len as usize - 6 - (salt_length + hash_length) as usize;
+          let type_bitmaps = buff.read_bytes(type_bitmaps_length)?;
+          let record_types = RecordType::parse_type_bitmaps(type_bitmaps.into())?;
 
-        let type_bitmaps_length = len as usize - 6 - (salt_length + hash_length) as usize;
-        let type_bitmaps = buff.read_bytes(type_bitmaps_length)?;
-        let record_types = RecordType::parse_type_bitmaps(type_bitmaps.into())?;
+          Self::NSEC3 { domain, class, ttl, hash_algorithm, opt_out, iterations, salt_length, salt, hash_length, next_hashed_owner_name, record_types }
+        },
 
-        Self::NSEC3 { domain, class, ttl, hash_algorithm, opt_out, iterations, salt_length, salt, hash_length, next_hashed_owner_name, record_types }
-      },
+        RecordType::NSEC3PARAM => {
+          let hash_algorithm = buff.read_u8()?;
+          let flags = buff.read_u8()?;
+          let iterations = buff.read_u16()?;
+          let salt_length = buff.read_u8()?;
+          let salt = buff.read_bytes(salt_length as usize)?.to_vec();
 
-      RecordType::NSEC3PARAM => {
-        let hash_algorithm = buff.read_u8()?;
-        let flags = buff.read_u8()?;
-        let iterations = buff.read_u16()?;
-        let salt_length = buff.read_u8()?;
-        let salt = buff.read_bytes(salt_length as usize)?.to_vec();
+          if flags != 0 {
+            return Ok(None); // if flags is not set to 0 then this record should be ignored
+          }
 
-        Self::NSEC3PARAM { domain, class, ttl, hash_algorithm, flags, iterations, salt_length, salt }
-      },
+          Self::NSEC3PARAM { domain, class, ttl, hash_algorithm, flags, iterations, salt_length, salt }
+        },
+      }))
     })
   }
 
@@ -607,5 +613,54 @@ impl Record {
 
     buff.write_buffer(&b)?;
     Ok(())
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn record_rw() {
+    let records: Vec<Record> = vec![
+      Record::A {
+        domain: vec!["google".to_string(), "com".to_string()],
+        addr: Ipv4Addr::from_bits(0x10101010),
+        ttl: 60,
+        class: RecordClass::IN,
+      },
+
+      Record::OPT {
+        udp_payload_size: 1024,
+        extended_rcode: 0,
+        version: 1,
+        dnssec_ok: true,
+        options: vec![
+          EDNSOption::Cookie { client: 100, server: None },
+          EDNSOption::Cookie { client: 100, server: Some(150) },
+          EDNSOption::ClientSubnet { family: 2, source_netmask: 75, scope_netmask: 0, addr: 0x10101010 },
+        ],
+      },
+    ];
+
+    let mut b = Buffer::with_capacity(0);
+    b.set_expandable(true);
+
+    for record in &records {
+      record.write_bytes(&mut b).expect("Failed at record write");
+    }
+
+    b.seek(0);
+    let mut records_after_read = vec![];
+
+    for _ in 0..records.len() {
+      records_after_read.push(
+        Record::parse(&mut b)
+          .expect("Failed at record read")
+          .expect("Record skipped unnecessarily"),
+      );
+    }
+
+    assert_eq!(records, records_after_read, "Records not equals after write+read");
   }
 }

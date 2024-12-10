@@ -18,6 +18,12 @@ pub mod record;
 pub mod packet;
 
 pub use crate::{
+  error::DrasilDNSError,
+  types::{
+    RecordType,
+    RecordClass,
+    dnssec::{DNSSECAlgorithm, DNSSECDigestType},
+  },
   packet::{
     Packet,
     builder::PacketBuilder,
@@ -28,10 +34,8 @@ pub use crate::{
     ResponseCode,
   },
   question::Question,
-  record::Record,
-  types::{
-    RecordClass,
-    RecordType,
-    dnssec,
+  record::{
+    Record,
+    edns::{EDNSOption, EDNSOptionType},
   },
 };

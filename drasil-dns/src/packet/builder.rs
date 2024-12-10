@@ -15,7 +15,6 @@ pub struct PacketBuilder {
   is_truncated_message: bool,
   is_recursion_desired: bool,
   is_recursion_available: bool,
-  reserved: u8,
   response_code: ResponseCode,
 
   questions: Vec<Question>,
@@ -36,7 +35,6 @@ impl PacketBuilder {
       is_recursion_desired: false,
       is_recursion_available: false,
       response_code: ResponseCode::NOERROR,
-      reserved: 0,
       questions: vec![],
       answers: vec![],
       authority: vec![],
@@ -55,7 +53,6 @@ impl PacketBuilder {
         is_truncated_message: self.is_truncated_message,
         is_recursion_desired: self.is_recursion_desired,
         is_recursion_available: self.is_recursion_available,
-        reserved: self.reserved,
         response_code: self.response_code,
         question_count: self.questions.len() as u16,
         answer_count: self.answers.len() as u16,

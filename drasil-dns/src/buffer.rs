@@ -224,7 +224,7 @@ impl Buffer {
           break;
         } else if len > 63 {
           self.pos = initial_pos;
-          return Err(DrasilDNSError::LabelTooLarge);
+          return Err(DrasilDNSError::LabelTooLarge { size: len });
         }
 
         let mut buff = vec![];
@@ -261,7 +261,7 @@ impl Buffer {
       let len = label_bytes.len() as u8;
 
       if len > 63 {
-        return Err(DrasilDNSError::LabelTooLarge);
+        return Err(DrasilDNSError::LabelTooLarge { size: len });
       }
 
       b.write_u8(len)?;
@@ -272,6 +272,21 @@ impl Buffer {
 
     self.write_buffer(&b)?;
     Ok(self.pos - initial_pos)
+  }
+
+  /// Helper method for atomic reads to `Buffer`.
+  /// Takes in a function and in case of a failure resets the `pos` counter.
+  /// This method **must** be used for read operations only, as any writes will not be reset. 
+  pub fn read_transaction<T, F>(&mut self, op: F) -> Result<T, DrasilDNSError>
+  where F: FnOnce(&mut Self) -> Result<T, DrasilDNSError> {
+    let pos = self.pos;
+    match op(self) {
+      Ok(v) => Ok(v),
+      Err(e) => {
+        self.pos = pos;
+        Err(e)
+      },
+    }
   }
 }
 
