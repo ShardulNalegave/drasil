@@ -1,5 +1,8 @@
 
 pub mod config;
+pub mod server;
+pub mod admin;
+pub mod utils;
 
 // ===== Imports =====
 #[macro_use] extern crate log;
@@ -9,28 +12,29 @@ pub mod config;
 use anyhow::Result;
 use clap::Parser;
 use merge::Merge;
-use tokio::net::UdpSocket;
+use tokio::{signal::unix::{signal, SignalKind}, sync::broadcast};
 // ===================
 
 #[tokio::main]
 async fn main() -> Result<()> {
   pretty_env_logger::init_custom_env("DRASIL_LOG_LEVEL");
 
-  let mut cfg = config::Config::parse();
-  let cfg_file = confy::load::<config::Config>("drasil", Some("config"))?;
-  cfg.merge(cfg_file);                  // Merge config file
+  let _args = config::Args::parse();
+
+  let mut cfg: config::Config = confy::load::<config::Config>("drasil", Some("config"))?;
   cfg.merge(config::Config::default()); // Merge default values
 
-  let host = cfg.host.expect("No host address provided");
-  let port = cfg.port.expect("No port provided");
+  let (
+    close_broadcast_tx,
+    close_broadcast_rx,
+  ) = broadcast::channel::<bool>(1);
 
-  info!("Listening at {}:{}", host, port);
+  let _admin_task = tokio::spawn(admin::run_admin());
+  let _udp_server_task = tokio::spawn(server::udp::run_udp());
 
-  let lis = UdpSocket::bind((host, port)).await?;
-  loop {
-    let mut buff = [0; 512];
-    let (_len, _from) = lis.recv_from(&mut buff).await?;
-    let packet = drasil_dns::packet::Packet::parse(&buff)?;
-    println!("{:#?}", packet);
-  }
+  let mut signal_task = signal(SignalKind::interrupt())?;
+  signal_task.recv().await;
+
+  close_broadcast_tx.send(true)?;
+  Ok(())
 }
