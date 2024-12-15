@@ -22,7 +22,7 @@ async fn main() -> Result<()> {
 
   let cfg = {
     let mut cfg: config::Config = confy::load::<config::Config>("drasil", Some("config"))
-    .context("Failed to load config file")?;
+      .context("Failed to load config file")?;
     cfg.merge(config::Config::default()); // Merge default values
 
     Arc::new(RwLock::new(cfg))
