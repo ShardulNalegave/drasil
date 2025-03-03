@@ -1,7 +1,7 @@
 
-const ABOUT: &str = "Recursive DNS resolver";
+static ABOUT: &str = "Recursive DNS resolver";
 
-#[derive(Debug, Parser, Serialize, Deserialize)]
+#[derive(Parser, Debug)]
 #[command(version, about = ABOUT, long_about = None)]
 pub struct Args {
   //
