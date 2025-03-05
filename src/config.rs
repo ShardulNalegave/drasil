@@ -7,9 +7,11 @@ pub struct Args {
   //
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Merge)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
+  #[serde(default)]
   pub admin: AdminConfig,
+  #[serde(default)]
   pub resolver: ResolverConfig,
 }
 
@@ -22,26 +24,34 @@ impl Default for Config {
   }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Merge)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AdminConfig {
-  pub port: Option<u16>,
-  pub host: Option<String>,
+  #[serde(default = "default_admin_port")]
+  pub port: u16,
+  #[serde(default = "default_admin_host")]
+  pub host: String,
 }
+
+fn default_admin_port() -> u16 { 7778 }
+fn default_admin_host() -> String { "0.0.0.0".to_string() }
 
 impl Default for AdminConfig {
   fn default() -> Self {
-    Self { port: Some(7778), host: Some("0.0.0.0".to_string()) }
+    Self { port: default_admin_port(), host: default_admin_host() }
   }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Merge)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ResolverConfig {
-  pub port: Option<u16>,
-  pub host: Option<String>,
+  pub port: u16,
+  pub host: String,
 }
+
+fn default_resolver_port() -> u16 { 7777 }
+fn default_resolver_host() -> String { "0.0.0.0".to_string() }
 
 impl Default for ResolverConfig {
   fn default() -> Self {
-    Self { port: Some(7777), host: Some("0.0.0.0".to_string()) }
+    Self { port: default_resolver_port(), host: default_resolver_host() }
   }
 }
