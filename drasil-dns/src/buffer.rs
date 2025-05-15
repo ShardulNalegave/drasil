@@ -31,7 +31,8 @@ impl From<Vec<u8>> for Buffer {
 }
 
 impl Into<Vec<u8>> for Buffer {
-  fn into(self) -> Vec<u8> {
+  fn into(mut self) -> Vec<u8> {
+    self.data.resize(self.pos, 0);
     self.data
   }
 }

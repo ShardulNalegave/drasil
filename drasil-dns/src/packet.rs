@@ -91,12 +91,7 @@ impl Packet {
       r.write_bytes(&mut buff)?;
     }
 
-    let mut data: Vec<u8> = buff.into();
-    if data.len() < 512 { // DNS packets are at minimum 512 bytes long
-      data.resize(512, 0);
-    }
-
-    Ok(data)
+    Ok(buff.into())
   }
 }
 
