@@ -1,20 +1,13 @@
 [package]
-name = "drasil"
-version = "0.1.0"
+name = "drasil-dns"
+description = "Rust crate to easily serialize and deserialize DNS packets"
+version = "0.2.1"
 edition = "2021"
+readme = "README.md"
+license = "MIT"
+repository = "https://github.com/ShardulNalegave/drasil"
+keywords = ["dns", "dnssec", "edns", "packet", "networking"]
+categories = ["network-programming"]
 
 [dependencies]
-anyhow = "1.0.93"
-clap = { version = "4.5.21", features = ["derive"] }
-confy = "0.6.1"
-log = "0.4.22"
-pretty_env_logger = "0.5.0"
-redis = "0.29.1"
-serde = { version = "1.0.215", features = ["derive"] }
-tokio = { version = "1.41.1", features = ["full"] }
-
-[dependencies.drasil-dns]
-path = "drasil-dns"
-
-[workspace]
-members = ["drasil-dns"]
+thiserror = "2.0.3"
